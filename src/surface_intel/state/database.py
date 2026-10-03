@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Database:
@@ -112,6 +112,20 @@ class Database:
                     health_status TEXT NOT NULL DEFAULT 'unknown',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS adapter_call (
+                    call_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    action_id TEXT,
+                    adapter_name TEXT NOT NULL,
+                    adapter_version TEXT NOT NULL,
+                    request_id TEXT,
+                    status TEXT NOT NULL,
+                    error_code TEXT,
+                    attempt INTEGER NOT NULL DEFAULT 0,
+                    input_summary TEXT NOT NULL,
+                    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS subtask (
                     subtask_id TEXT PRIMARY KEY,
                     parent_task_id TEXT NOT NULL REFERENCES task(task_id),
@@ -158,11 +172,20 @@ class Database:
                 ("started_at", "TEXT"),
                 ("completed_at", "TEXT"),
                 ("error_code", "TEXT"),
+                ("phase", "TEXT NOT NULL DEFAULT 'unknown'"),
+                ("target_ref", "TEXT"),
+                ("input_json", "TEXT NOT NULL DEFAULT '{}'" ),
+                ("cost_units", "INTEGER NOT NULL DEFAULT 0"),
+                ("request_id", "TEXT"),
+                ("next_cursor_ref", "TEXT"),
+                ("external_state", "TEXT NOT NULL DEFAULT 'not_started'"),
+                ("last_error_code", "TEXT"),
             ):
                 if name not in columns:
                     db.execute(f"ALTER TABLE action ADD COLUMN {name} {definition}")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (2)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (3)")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (4)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

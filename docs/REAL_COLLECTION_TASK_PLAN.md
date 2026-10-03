@@ -121,35 +121,45 @@ MCP、Playwright MCP，未访问真实目标，未执行主动探测，`fofa-mcp
 **目标**：消除真实适配器与离线 Coordinator 之间的断层，所有适配器都通过
 持久化动作运行。
 
-**状态**：待开始。进入条件：R0 checkpoint 已保存，能力状态契约、覆盖矩阵和
-离线测试基线已冻结。
+**状态**：进行中（2026-10-03，R1 第一增量）。
+进入条件已满足：R0 checkpoint 已保存，能力状态契约、覆盖矩阵和离线测试基线
+已冻结。
 
 ### 代码和数据任务
 
-- [ ] 新增 `ExecutionContext`，包含 task、scope snapshot、budget snapshot、
+- [x] 新增 `ExecutionContext`，包含 task、scope snapshot、budget snapshot、
       adapter manifest、correlation id、evidence root 和 stop token。
-- [ ] 新增 `ActionRepository`，统一实现领取、原子启动、心跳、完成、失败、
+- [x] 新增 `ActionRepository`，统一实现领取、原子启动、完成、失败、
       取消、超时、未知、重试和幂等查询。
-- [ ] 扩展 action 字段：`phase`、`target_ref`、`input_json`、`attempt`、
+- [x] 扩展 action 字段：`phase`、`target_ref`、`input_json`、`attempt`、
       `cost_units`、`request_id`、`next_cursor_ref`、`scope_version`、
       `external_state`、`last_error_code`、`started_at`、`completed_at`。
-- [ ] 新增 `adapter_call` 或等价事件表，保存 adapter 名称/版本、动作 ID、
+- [x] 新增 `adapter_call` 或等价事件表，保存 adapter 名称/版本、动作 ID、
       request id、开始/结束时间、状态、重试次数、脱敏输入摘要和错误分类。
-- [ ] 将 `run_offline_task` 重构为可注入 adapter registry 的通用 runner；
+- [x] 将 `run_offline_task` 重构为可注入 adapter registry 的通用 runner；
       Mock 只作为 registry 中的一种实现。
 - [ ] 所有 adapter 调用前执行 `validate`、`check_budget`、`check_time_window`、
       `is_target_in_scope`、`is_action_allowed` 和 capability check。
-- [ ] 外部失败分类为 `timeout`、`rate_limited`、`auth_unavailable`、
+- [x] 外部失败分类为 `timeout`、`rate_limited`、`auth_unavailable`、
       `dependency_unavailable`、`invalid_input`、`remote_error`、
       `unknown_external_state`，禁止宽泛吞错。
 
 ### 测试
 
-- [ ] 同一 idempotency key 只能产生一次外部动作。
-- [ ] action 在 `started` 后崩溃恢复为 `unknown`，不得直接再次执行。
-- [ ] adapter 返回敏感字段时，普通日志和报告均不可见。
+- [x] 同一 idempotency key 只能产生一次外部动作。
+- [x] action 在 `started` 后崩溃恢复为 `unknown`，不得直接再次执行。
+- [x] adapter 返回敏感字段时，普通日志和报告均不可见。
 - [ ] 预算耗尽、时间窗关闭、范围版本变化和 adapter 能力不足都在外部调用
       前阻止执行。
+
+**R1 第一增量实际验证**：schema migration version 4、`adapter_call` 审计表、
+扩展 action 字段、`ExecutionContext`、`ActionRepository` 和统一
+`AdapterExecutor` 已接入离线 Coordinator。`uv run pytest -q` 结果为
+`32 passed`。
+
+**R1 尚未完成**：时间窗口、目标级范围检查、事务性预算 reservation、重试/
+退避、真实 MCP transport 和完整模式调度仍待后续增量；因此当前仍只能声明
+离线/受控执行器能力，不能声明真实数据源生产可用。
 
 ## R2：FOFA 生产闭环
 

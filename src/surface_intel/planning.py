@@ -19,7 +19,7 @@ def build_passive_plan(task_id: str, scope: Scope, targets: Iterable[str]) -> li
     for target in targets:
         if scope.is_in_scope(target):
             query = f'domain="{target}"'
-            plan.append({"purpose": "domain_assets", "query": query, "fingerprint": query_fingerprint(query)})
+            plan.append({"purpose": "domain_assets", "target": target, "query": query, "fingerprint": query_fingerprint(query)})
     return plan
 
 
@@ -30,10 +30,12 @@ def persist_actions(db: Database, task_id: str, scope: Scope, plan: list[dict[st
             key = f"{task_id}:{item['fingerprint']}:passive"
             cursor = connection.execute(
                 """INSERT OR IGNORE INTO action
-                   (action_id,task_id,idempotency_key,adapter,status,scope_version,attempt)
-                   VALUES(?,?,?,?,?,?,?)""",
+                   (action_id,task_id,idempotency_key,adapter,status,scope_version,attempt,input_json,phase)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
                 (f"action-{uuid.uuid4().hex[:16]}", task_id, key, "mock_passive",
-                 ActionStatus.PLANNED.value, scope.scope_version, 0),
+                 ActionStatus.PLANNED.value, scope.scope_version, 0,
+                 json.dumps({"target": item["target"], "capability": "passive_observation"}, ensure_ascii=True),
+                 "collecting_passive"),
             )
             inserted += cursor.rowcount
     return inserted

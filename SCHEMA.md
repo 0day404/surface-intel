@@ -11,6 +11,8 @@
 `attempt`、`started_at`、`completed_at`、`error_code`。
 Migration 3 增加 `subtask`、`agent_lease` 和 `subtask_result`，用于租约、心跳、
 超时恢复和重复结果提交保护。
+Migration 4 扩展 `action` 的执行上下文和外部状态字段，并增加 `adapter_call`
+审计表，用于统一执行器记录脱敏输入、适配器版本、request id、错误分类和完成时间。
 
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
