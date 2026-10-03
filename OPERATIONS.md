@@ -55,6 +55,19 @@ R4.3 放开 ASN 直查：`rdap-lookup --kind asn` 在两种依据下放行——
 `target` 记录被查 ASN、`scope_anchor` 记录锚点。ASN 数据仍只能产生 candidate
 归属，组织名/ASN 相同绝不确认资产。
 
+R5 执行强化（执行器 + 调度）：`run --mode serial|hybrid|delegated` 现在映射
+真实调度策略——serial 顺序执行、hybrid 以并发信号量（默认 2）并行被动动作、
+delegated 按适配器分组创建租约型 subtask 行再逐组执行。执行器新增三级运行
+门控：`RateLimiter`（每适配器与每目标独立最小间隔时间线，测试注入时钟）、
+`action_timeout`（超时先取消；取消失败标记外部终态 `unknown`，绝不假装
+知道）、`max_consecutive_errors`（连续失败达到阈值置 stop 并停止调度）。
+暂停/取消/连续错误在动作之间生效，不产生新的分页或探测调用。四级预算
+`BudgetLedger`（task/phase/target/adapter，budget 表 kind 前缀
+`level:key`）在执行器中原子多级预留——任一级无余量则整组回滚；已执行动作
+（含 failed/timed_out）提交消耗事实，不伪造退回。scope 变化时
+`freeze_stale_actions` 冻结旧版本未完结动作（cancelled+scope_version_frozen），
+已完成结果留作历史快照。
+
 R4.1 增加离线归并入口：`surface-intel merge <task-id> --task-root .\task` 读取
 任务全部 observation（R4.4 起覆盖 dns_resolver/ct_log/rdap_lookup/fofa_mcp，
 未知来源计入 skipped），幂等地生成/更新统一资产、关系和冲突行，并执行架构

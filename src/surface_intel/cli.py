@@ -149,7 +149,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
-        result = asyncio.run(run_offline_task(db, args.task_id))
+        result = asyncio.run(run_offline_task(db, args.task_id, mode=args.mode))
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2

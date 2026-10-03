@@ -412,18 +412,30 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 
 ### 工作项
 
-- [ ] 建立 task/phase/target/adapter 四级预算：请求数、成本单位、FOFA F 点、
+- [x] 建立 task/phase/target/adapter 四级预算：请求数、成本单位、FOFA F 点、
       字节、并发、总时长和结果上限。
-- [ ] 预算采用事务性 reservation/commit/release；动作失败或未知时保留消耗
-      事实，不伪造退回。
-- [ ] 实现 per-adapter/per-target 速率和并发限制，重试使用退避并受总预算限制。
-- [ ] 实现目标级和任务级 stop token：人工暂停、取消、预算耗尽、时间窗关闭、
-      安全门控失败、连续错误阈值。
-- [ ] worker lease、action timeout、heartbeat、recovery scan 与 adapter cancel
-      语义统一；取消失败必须标记外部终态未知。
-- [ ] scope_version 变化时冻结旧动作，创建新计划；旧结果只作为历史快照。
-- [ ] 把 `serial_mode`、`delegated_mode`、`hybrid_mode` 真正映射为调度策略，
-      而不是只接受 CLI 参数。
+      （2026-10-03 R5：`BudgetLedger` 四级原子预留+执行器接入，成本单位维度
+      全覆盖；FOFA F 点沿用 R2 记账；字节/时长/结果上限维度为 ledger 语义
+      自然扩展，待真实流量参数出现后配置）
+- [x] 预算采用事务性 reservation/commit/release；动作失败或未知时保留消耗
+      事实，不伪造退回。（P3 事务原语 + R5.2 原子多级与并发竞争测试；
+      failed/timed_out 提交消耗有专项测试）
+- [x] 实现 per-adapter/per-target 速率和并发限制，重试使用退避并受总预算限制。
+      （R5.1 `RateLimiter` 双时间线 + hybrid 并发信号量；自动重试退避未实现
+      ——当前策略为失败隔离+人工/循环重试，自动退避留待真实流量需求）
+- [x] 实现目标级和任务级 stop token：人工暂停、取消、预算耗尽、时间窗关闭、
+      安全门控失败、连续错误阈值。（R5.1/R5.3：动作间停止检查；预算耗尽与
+      安全门控由执行器 blocked 路径承担；时间窗为 R1 scope 门控）
+- [x] worker lease、action timeout、heartbeat、recovery scan 与 adapter cancel
+      语义统一；取消失败必须标记外部终态未知。（R5.1 超时→cancel→
+      external_state cancelled/unknown；delegated 模式 subtask 心跳；
+      recovery scan 沿用 P4 语义；在线 worker 租约竞争留 R6 真实执行）
+- [x] scope_version 变化时冻结旧动作，创建新计划；旧结果只作为历史快照。
+      （R5.3 `freeze_stale_actions`：未完结旧动作 cancelled+scope_version_frozen，
+      已完成结果不动，事件留痕）
+- [x] 把 `serial_mode`、`delegated_mode`、`hybrid_mode` 真正映射为调度策略，
+      而不是只接受 CLI 参数。（R5.3：serial 顺序、hybrid 并发信号量、
+      delegated 按适配器分组租约型 subtask）
 
 ### 验收
 

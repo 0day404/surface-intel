@@ -66,6 +66,7 @@ class AdapterResult:
     required_fpoints: int | None = None
     request_id: str | None = None
     error: str | None = None
+    external_state: str | None = None  # timeout/cancel outcome: cancelled/unknown
 
 
 class Adapter(Protocol):
