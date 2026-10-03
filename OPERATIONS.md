@@ -68,6 +68,21 @@ delegated 按适配器分组创建租约型 subtask 行再逐组执行。执行�
 `freeze_stale_actions` 冻结旧版本未完结动作（cancelled+scope_version_frozen），
 已完成结果留作历史快照。
 
+R6 真实观察入口（均要求 `--real --confirm-real`、范围开启 active_testing、
+R4 架构门控与 R5 预算/停止在执行器层生效）：
+`http-observe <task-id> --url <url> [--method GET|HEAD]`——低影响 GET/HEAD，
+逐跳重定向授权（范围外 Location 阻断不联系）、私网/回连连接前拒绝、
+body ≤256KB 仅存摘要、响应头白名单、TLS 证书摘要、200/404/403/429/超时/
+TLS 错误分别建模；架构阻断集（CDN/WAF/LB/云/第三方 candidate/likely）
+生成高优先级 review item 且零流量。
+`port-check <task-id> --target <host> --port <n>`——端口必须显式列入范围
+`allowed_ports`（空清单授权为零），无扫描原语；开放观察恒 candidate。
+`browser-observe <task-id> --url <url> [--max-requests n]`——外部 Playwright
+MCP（`npx -y @playwright/mcp@latest --stdio`）公开页观察；浏览器范围对象
+限制落点（范围外 origin 记 third_party_origins→needs_review 不跟随），
+网络摘要丢弃 headers/cookies/post_data；登录/状态变更/下载在适配器契约
+拒绝；未配置 node/npx 时健康检查给出显式 not_configured 原因。
+
 R4.1 增加离线归并入口：`surface-intel merge <task-id> --task-root .\task` 读取
 任务全部 observation（R4.4 起覆盖 dns_resolver/ct_log/rdap_lookup/fofa_mcp，
 未知来源计入 skipped），幂等地生成/更新统一资产、关系和冲突行，并执行架构

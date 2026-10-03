@@ -449,32 +449,51 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 
 ### 6.1 Safe HTTP
 
-- [ ] 接入真实异步 transport，限制方法为 GET/HEAD（按策略配置），禁止表单、
-      上传、下载、认证和状态变更。
-- [ ] 记录状态码、最终 URL、重定向链、TLS 摘要、响应头白名单、内容类型、
-      body 摘要、超时、429 和 TLS 错误；不保存完整敏感响应。
-- [ ] 对 200、404、403、429、超时和 TLS 错误分别建模，不能只记录成功/失败。
-- [ ] 自动阻止未授权 Host、重定向到第三方、私网/本地回连和架构状态不允许
-      的目标。
+- [x] 接入真实异步 transport，限制方法为 GET/HEAD（按策略配置），禁止表单、
+      上传、下载、认证和状态变更。（2026-10-04 R6.1：http.client 手动单跳 +
+      to_thread 异步；方法白名单 GET/HEAD，策略经 allowed_methods）
+- [x] 记录状态码、最终 URL、重定向链、TLS 摘要、响应头白名单、内容类型、
+      body 摘要、超时、429 和 TLS 错误；不保存完整敏感响应。（header 白名单
+      （Cookie/Auth 永不落盘）、body ≤256KB 仅 SHA-256 摘要+truncated、
+      https 对端证书 SHA-256）
+- [x] 对 200、404、403、429、超时和 TLS 错误分别建模，不能只记录成功/失败。
+      （response_class ok/not_found/forbidden/rate_limited/other + 结构状态
+      observed/timeout/tls_error/http_error/redirect_blocked/private_blocked）
+- [x] 自动阻止未授权 Host、重定向到第三方、私网/本地回连和架构状态不允许
+      的目标。（连接前 DNS 预解析拒绝私网；每跳重定向重新授权；R4 架构
+      阻断集 + 幂等 review item）
 
 ### 6.2 Safe Port
 
-- [ ] 只验证授权目标中明确列出的端口；禁止端口范围扫描和相邻地址扩展。
-- [ ] 记录连接结果、协议猜测、超时、TLS 摘要和服务识别置信度。
-- [ ] 端口开放不能自动证明资产归属或允许更高等级探测。
+- [x] 只验证授权目标中明确列出的端口；禁止端口范围扫描和相邻地址扩展。
+      （2026-10-04 R6.2：scope `allowed_ports` 显式清单——空清单授权为零，
+      相邻/未列端口一律 port_not_authorized 且零流量；无扫描原语）
+- [x] 记录连接结果、协议猜测、超时、TLS 摘要和服务识别置信度。
+      （open/closed/timeout/filtered/tls_error 五态；端口表提示置信度有界
+      0.5；TLS 握手成功记对端证书摘要，握手失败仍记 open+tls_error）
+- [x] 端口开放不能自动证明资产归属或允许更高等级探测。（开放观察恒为
+      candidate，closed 为 not_applicable 定案；不改 scope、不解锁门控）
 
 ### 6.3 Playwright
 
-- [ ] 记录外部 MCP 命令、实际版本、连接方式、健康检查和 `not_configured`
-      原因。
-- [ ] 使用浏览器范围对象限制初始域名、重定向、XHR/fetch、WebSocket/SSE、
-      资源和时间预算。
-- [ ] 只观察公开页面：页面状态、最终 URL、SPA 路由、网络摘要、控制台错误、
-      资源失败和截图元数据。
-- [ ] 阻止登录、MFA/CAPTCHA 绕过、凭据尝试、上传、下载、支付、发信、创建/
-      删除/修改业务数据和自动访问新第三方域名。
-- [ ] Cookie、Set-Cookie、Authorization、Token、密码和个人数据在证据写入前
-      脱敏或拒绝提交。
+- [x] 记录外部 MCP 命令、实际版本、连接方式、健康检查和 `not_configured`
+      原因。（2026-10-04 R6.3：stdio JSON-RPC 复用 FOFA 传输；launch 命令
+      `npx -y @playwright/mcp@latest --stdio`；FileNotFound/OSError/MCP 错误
+      分别映射显式 not_configured 原因）
+- [x] 使用浏览器范围对象限制初始域名、重定向、XHR/fetch、WebSocket/SSE、
+      资源和时间预算。（runner 传入 scope_domains + max_requests 上限；
+      范围外 origin 记录为 third_party_origins，不继续跟随；超时经
+      transport timeout + R5 action_timeout）
+- [x] 只观察公开页面：页面状态、最终 URL、SPA 路由、网络摘要、控制台错误、
+      资源失败和截图元数据。（final URL/title/status/网络摘要（URL+方法+
+      状态+资源类型）/console error 计数/截图引用元数据）
+- [x] 阻止登录、MFA/CAPTCHA 绕过、凭据尝试、上传、下载、支付、发信、创建/
+      删除/修改业务数据和自动访问新第三方域名。（适配器契约拒绝
+      allow_login/allow_state_change/allow_download；浏览器无凭据、无表单
+      提交原语；范围外 origin 只记录不访问）
+- [x] Cookie、Set-Cookie、Authorization、Token、密码和个人数据在证据写入前
+      脱敏或拒绝提交。（网络摘要在 client 第一层丢弃 headers/cookies/
+      post_data 键，redact 模块第二层兜底）
 
 ### 验收
 

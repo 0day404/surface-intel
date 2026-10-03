@@ -54,9 +54,13 @@ class SafePortAdapter:
             observations=[{
                 "target": action["target"],
                 "port": action["port"],
-                "transport_status": response.get("transport_status", "unknown"),
-                "service": response.get("service"),
-                "confidence": response.get("confidence", 0.0),
+                "transport_status": response.get("transport_status", response.get("status", "unknown")),
+                "service": response.get("service", response.get("service_hint")),
+                "confidence": response.get("confidence", response.get("service_confidence", 0.0)),
+                "tls_sha256": response.get("tls_sha256"),
+                "tls_error": bool(response.get("tls_error", False)),
+                "probe_ms": response.get("probe_ms"),
+                "source": self.manifest.name,
             }],
             cost_units=self.manifest.cost_units,
         )

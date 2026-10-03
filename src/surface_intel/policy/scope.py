@@ -21,6 +21,7 @@ class Scope:
     authorized_ips: tuple[str, ...] = ()
     authorized_cidrs: tuple[str, ...] = ()
     authorized_asns: tuple[str, ...] = ()
+    allowed_ports: tuple[int, ...] = ()
     excluded_targets: tuple[str, ...] = ()
     active_testing_allowed: bool = False
     active_testing_level: ActiveLevel = ActiveLevel.PASSIVE_ONLY
@@ -36,7 +37,8 @@ class Scope:
                 field: tuple(data.get(field, ())) if field not in {"active_testing_allowed", "active_testing_level", "confirmed", "scope_version", "starts_at", "ends_at"} else data.get(field, default)
                 for field, default in (
                     ("authorized_targets", ()), ("authorized_domains", ()), ("authorized_ips", ()),
-                    ("authorized_cidrs", ()), ("authorized_asns", ()), ("excluded_targets", ()),
+                    ("authorized_cidrs", ()), ("authorized_asns", ()), ("allowed_ports", ()),
+                    ("excluded_targets", ()),
                     ("active_testing_allowed", False), ("active_testing_level", ActiveLevel.PASSIVE_ONLY),
                     ("confirmed", False), ("scope_version", "scope-v0001"), ("starts_at", None), ("ends_at", None),
                 )
@@ -50,6 +52,7 @@ class Scope:
             "authorized_ips": list(self.authorized_ips),
             "authorized_cidrs": list(self.authorized_cidrs),
             "authorized_asns": list(self.authorized_asns),
+            "allowed_ports": list(self.allowed_ports),
             "excluded_targets": list(self.excluded_targets),
             "active_testing_allowed": self.active_testing_allowed,
             "active_testing_level": self.active_testing_level.value

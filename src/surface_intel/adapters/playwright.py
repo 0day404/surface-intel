@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..states import ActionStatus
 from .base import AdapterManifest, AdapterResult, TaskContext
 
 
@@ -32,7 +33,7 @@ class PlaywrightAdapter:
         return AdapterResult("completed" if result.get("ok") else "failed", request_id=result.get("request_id"), error=result.get("error"))
 
     async def validate(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
-        target = str(action.get("target", ""))
+        target = str(action.get("lookup_target", "")).strip() or str(action.get("target", ""))
         host = urlsplit(target).hostname
         allowed_domains = tuple(context.metadata.get("allowed_domains", ()))
         if not host or urlsplit(target).scheme not in {"http", "https"}:
@@ -51,22 +52,30 @@ class PlaywrightAdapter:
         validation = await self.validate(action, context)
         if validation.status != "completed":
             return validation
-        result = await self.call_tool("observe_public_page", {"url": action["target"]})
+        anchor = str(action["target"])
+        target = str(action.get("lookup_target", "")).strip() or anchor
+        result = await self.call_tool("observe_public_page", {"url": target})
+        outcome_status = str(result.get("status", "failed"))
+        action_status = (ActionStatus.COMPLETED.value
+                         if outcome_status in {"observed", "completed"}
+                         else ActionStatus.FAILED.value)
         return AdapterResult(
-            result.get("status", "failed"),
+            action_status,
             observations=[{
-                "page_url": result.get("page_url", action["target"]),
-                "final_url": result.get("final_url", action["target"]),
+                "page_url": target,
+                "scope_anchor": anchor if target != anchor else None,
+                "final_url": result.get("final_url", target),
                 "title": result.get("title", ""),
                 "status_code": result.get("status_code"),
                 "api_requests": result.get("api_requests", []),
                 "third_party_origins": result.get("third_party_origins", []),
                 "console_error_count": result.get("console_error_count", 0),
                 "screenshot_ref": result.get("screenshot_ref", ""),
+                "source": self.manifest.name,
             }],
             evidence_refs=result.get("evidence_refs", []),
             request_id=result.get("request_id"),
-            error=result.get("error"),
+            error=result.get("error") if action_status == ActionStatus.FAILED.value else None,
         )
 
     async def cancel(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:

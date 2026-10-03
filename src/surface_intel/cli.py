@@ -552,6 +552,104 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
     return 0 if result.status == "completed" else 2
 
 
+def cmd_port_check(args: argparse.Namespace) -> int:
+    from surface_intel.safe_port_client import SafePortProbeClient
+    from surface_intel.safe_port_runner import run_port_check
+
+    if not args.real or not args.confirm_real:
+        print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
+        return 2
+    db = Database(_config(args).database_path)
+    db.initialize()
+    scope_row = next(db.rows(
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+    ), None)
+    if scope_row is None or not scope_row["confirmed"]:
+        print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    host = args.target.strip().lower().rstrip(".")
+    if not host or not scope.is_in_scope(host):
+        print(json.dumps({"ok": False, "error": "target_out_of_scope"}))
+        return 2
+    if not scope.active_testing_allowed or scope.active_testing_level.value == "passive_only":
+        print(json.dumps({"ok": False, "error": "active_testing_not_authorized"}))
+        return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.PROBING_AUTHORIZED.value, args.task_id),
+        )
+    client = SafePortProbeClient()
+
+    async def call():
+        return await run_port_check(db, client, task_id=args.task_id, scope=scope,
+                                    target=args.target, port=args.port)
+
+    try:
+        result = asyncio.run(call())
+    except Exception as exc:
+        print(json.dumps({"ok": False, "status": "failed", "error": type(exc).__name__}))
+        return 2
+    print(json.dumps({
+        "ok": result.status == "completed",
+        "status": result.status,
+        "observations": result.observations,
+        "error": result.error,
+        "review_created": result.review_created,
+    }, ensure_ascii=True))
+    return 0 if result.status == "completed" else 2
+
+
+def cmd_browser_observe(args: argparse.Namespace) -> int:
+    from surface_intel.playwright_client import configured_playwright_client
+    from surface_intel.playwright_runner import run_browser_observe
+
+    if not args.real or not args.confirm_real:
+        print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
+        return 2
+    db = Database(_config(args).database_path)
+    db.initialize()
+    scope_row = next(db.rows(
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+    ), None)
+    if scope_row is None or not scope_row["confirmed"]:
+        print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    host = urlsplit(args.url).hostname or ""
+    if not host or not scope.is_in_scope(host):
+        print(json.dumps({"ok": False, "error": "target_out_of_scope"}))
+        return 2
+    if not scope.active_testing_allowed or scope.active_testing_level.value == "passive_only":
+        print(json.dumps({"ok": False, "error": "active_testing_not_authorized"}))
+        return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.OBSERVING_BROWSER.value, args.task_id),
+        )
+    client = configured_playwright_client()
+
+    async def call():
+        return await run_browser_observe(db, client, task_id=args.task_id, scope=scope,
+                                         url=args.url, max_requests=args.max_requests)
+
+    try:
+        result = asyncio.run(call())
+    except Exception as exc:
+        print(json.dumps({"ok": False, "status": "failed", "error": type(exc).__name__}))
+        return 2
+    print(json.dumps({
+        "ok": result.status == "completed",
+        "status": result.status,
+        "observations": result.observations,
+        "error": result.error,
+        "review_created": result.review_created,
+    }, ensure_ascii=True))
+    return 0 if result.status == "completed" else 2
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
@@ -602,7 +700,7 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -649,6 +747,18 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("task_id")
             command.add_argument("--url", required=True)
             command.add_argument("--method", default="GET", choices=("GET", "HEAD"))
+            command.add_argument("--real", action="store_true")
+            command.add_argument("--confirm-real", action="store_true")
+        if name == "port-check":
+            command.add_argument("task_id")
+            command.add_argument("--target", required=True)
+            command.add_argument("--port", type=int, required=True)
+            command.add_argument("--real", action="store_true")
+            command.add_argument("--confirm-real", action="store_true")
+        if name == "browser-observe":
+            command.add_argument("task_id")
+            command.add_argument("--url", required=True)
+            command.add_argument("--max-requests", type=int, default=100)
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
         if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge"}:
