@@ -12,6 +12,9 @@
 P6 的 Playwright 连接通过注入的 MCP 调用边界测试；项目不复制 Playwright 源码、
 `node_modules`、浏览器缓存或凭据。
 
+`run` 支持 `--mode serial|delegated|hybrid`；三种模式共享同一持久化状态和安全门控。
+恢复时读取 checkpoint，未知外部终态不会被自动重放。
+
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。

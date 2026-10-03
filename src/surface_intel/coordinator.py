@@ -9,7 +9,7 @@ from .adapters.base import TaskContext
 from .adapters.mock import MockFofaAdapter, MockPassiveAdapter
 from .normalization import normalize_target
 from .state.database import Database
-from .state.recovery import create_checkpoint
+from .state.recovery import create_checkpoint, latest_checkpoint
 from .states import ActionStatus, TaskStatus
 
 
@@ -20,11 +20,20 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
     scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (task_id,)), None)
     if scope_row is None or not scope_row["confirmed"]:
         raise ValueError("scope_not_confirmed")
-    context = TaskContext(task_id, scope_row["scope_version"])
+    context = TaskContext(
+        task_id,
+        scope_row["scope_version"],
+        {
+            "scope_confirmed": bool(scope_row["confirmed"]),
+            "active_level": "passive_only",
+        },
+    )
     passive = MockPassiveAdapter()
     fofa = MockFofaAdapter(fofa_pages or [{"observations": [], "has_more": False}])
     observations = 0
     assets = 0
+    if task["status"] in {TaskStatus.PAUSED.value, TaskStatus.CANCELLED.value}:
+        raise ValueError(f"task_{task['status']}")
     with db.connect() as connection:
         connection.execute("UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (TaskStatus.COLLECTING_PASSIVE.value, task_id))
     actions = list(db.rows("SELECT * FROM action WHERE task_id=? AND status=?", (task_id, ActionStatus.PLANNED.value)))
@@ -39,15 +48,20 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
             for item in result.observations:
                 _store_observation(connection, task_id, result, item)
                 observations += 1
-            connection.execute("UPDATE action SET status=?, result_ref=?, updated_at=CURRENT_TIMESTAMP WHERE action_id=?",
-                               (result.status, result.request_id, action["action_id"]))
+            connection.execute(
+                "UPDATE action SET status=?, result_ref=?, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE action_id=?",
+                (result.status, result.request_id, action["action_id"]),
+            )
         create_checkpoint(
             db,
             task_id,
             phase="collecting_passive",
             payload={"last_action_id": action["action_id"], "observations": observations, "assets": assets},
         )
-    fofa_result = await fofa.execute({"query": "offline-fixture", "page": 1}, context)
+    checkpoint = latest_checkpoint(db, task_id)
+    completed_pages = int((checkpoint or {}).get("payload", {}).get("fofa_pages", 0))
+    fofa_result = await fofa.execute({"query": "offline-fixture", "page": completed_pages + 1}, context)
+    pages_processed = completed_pages
     while True:
         with db.connect() as connection:
             for item in fofa_result.observations:
@@ -60,9 +74,26 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
                         (f"asset-{uuid.uuid4().hex[:16]}", task_id, normalized.target_type, normalized.normalized_value, "candidate", 0.5),
                     )
                     assets += cursor.rowcount
+        pages_processed += 1
+        create_checkpoint(
+            db,
+            task_id,
+            phase="collecting_fofa",
+            payload={
+                "fofa_pages": pages_processed,
+                "observations": observations,
+                "assets": assets,
+                "next_token": fofa_result.next_token,
+            },
+        )
         if not fofa_result.has_more:
             break
-        fofa_result = await fofa.execute({"query": "offline-fixture", "page": len(fofa.calls) + 1, "next_token": fofa_result.next_token}, context)
+        if next(db.rows("SELECT status FROM task WHERE task_id=?", (task_id,)), None)["status"] in {
+            TaskStatus.PAUSED.value,
+            TaskStatus.CANCELLED.value,
+        }:
+            return {"task_id": task_id, "observations": observations, "assets": assets, "status": "paused"}
+        fofa_result = await fofa.execute({"query": "offline-fixture", "page": pages_processed + 1, "next_token": fofa_result.next_token}, context)
     with db.connect() as connection:
         connection.execute("INSERT INTO gap(gap_id,task_id,priority,reason) VALUES(?,?,?,?)",
                            (f"gap-{uuid.uuid4().hex[:16]}", task_id, "medium", "active_observation_not_authorized"))
@@ -71,7 +102,7 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
         db,
         task_id,
         phase="correlating",
-        payload={"observations": observations, "assets": assets, "fofa_pages": len(fofa.calls)},
+        payload={"observations": observations, "assets": assets, "fofa_pages": pages_processed},
     )
     return {"task_id": task_id, "observations": observations, "assets": assets}
 

@@ -141,7 +141,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2
-    print(json.dumps({"ok": True, **result}, ensure_ascii=True))
+    print(json.dumps({"ok": True, "mode": args.mode, **result}, ensure_ascii=True))
     return 0
 
 
@@ -205,12 +205,14 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "create":
             command.add_argument("--input", required=False)
             command.add_argument("--scope", required=True)
+        if name == "run":
+            command.add_argument("--mode", choices=("serial", "delegated", "hybrid"), default="serial")
         if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")
             command.add_argument("--reason", default="")
-        if name in {"pause", "cancel"}:
+        if name in {"pause", "cancel", "resume"}:
             command.add_argument("--reason", default="")
     return parser
 
