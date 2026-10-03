@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Database:
@@ -136,6 +136,37 @@ class Database:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(task_id, kind)
                 );
+                CREATE TABLE IF NOT EXISTS fofa_query_batch (
+                    batch_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    query_fingerprint TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    batch_index INTEGER NOT NULL,
+                    parent_query_id TEXT,
+                    split_reason TEXT,
+                    status TEXT NOT NULL,
+                    scope_version TEXT NOT NULL,
+                    request_id TEXT,
+                    cursor TEXT,
+                    next_token TEXT,
+                    cost_units INTEGER NOT NULL DEFAULT 0,
+                    result_count INTEGER NOT NULL DEFAULT 0,
+                    error_code TEXT,
+                    UNIQUE(task_id, query_fingerprint, batch_index)
+                );
+                CREATE TABLE IF NOT EXISTS fofa_cursor (
+                    cursor_id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL REFERENCES fofa_query_batch(batch_id),
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    query_fingerprint TEXT NOT NULL,
+                    next_token TEXT NOT NULL,
+                    cursor_page INTEGER NOT NULL,
+                    request_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(batch_id, next_token)
+                );
                 CREATE TABLE IF NOT EXISTS subtask (
                     subtask_id TEXT PRIMARY KEY,
                     parent_task_id TEXT NOT NULL REFERENCES task(task_id),
@@ -197,6 +228,7 @@ class Database:
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (3)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (4)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (5)")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (6)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

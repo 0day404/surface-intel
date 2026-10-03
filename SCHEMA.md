@@ -15,6 +15,8 @@ Migration 4 扩展 `action` 的执行上下文和外部状态字段，并增加 
 审计表，用于统一执行器记录脱敏输入、适配器版本、request id、错误分类和完成时间。
 Migration 5 增加 `budget` 表，支持按任务和预算类型进行事务性预留、提交和释放，
 用于并发执行时避免成本超卖。
+Migration 6 增加 `fofa_query_batch` 和 `fofa_cursor`，持久化 FOFA 查询指纹、
+拆分批次、分页 token、request id、成本、结果数量和独立失败状态。
 
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、

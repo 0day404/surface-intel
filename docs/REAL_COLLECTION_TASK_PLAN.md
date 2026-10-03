@@ -164,19 +164,26 @@ version 和时间窗口门控；新增 SQLite `budget` 表及事务性 reserve/c
 **R1 尚未完成**：重试/退避、真实 MCP transport 和完整模式调度仍待后续增量；
 因此当前仍只能声明离线/受控执行器能力，不能声明真实数据源生产可用。
 
+**R2 第一增量实际验证**：确认独立 `fofa-mcp` 的 stdio 启动入口和七个工具契约；
+新增 `McpCallClient` 边界、FOFA batch/cursor 表及 repository，支持 request id、
+next token、成本、结果数量和单批失败隔离。`uv run pytest -q` 结果为
+`39 passed`。真实 stdio 会话、真实凭据和真实 FOFA 查询尚未运行。
+
 ## R2：FOFA 生产闭环
 
 **目标**：通过独立 FOFA MCP 适配器完成真实健康检查、查询、分页、游标、
    成本和失败批次恢复，不把 FOFA 逻辑写入 `fofa-mcp`。
 
+**状态**：进行中（2026-10-03，第一增量）。
+
 ### 2.1 MCP 契约和健康检查
 
-- [ ] 明确实际 MCP transport/连接方式，封装为独立 `McpCallClient`；
-      Coordinator 不直接依赖 MCP SDK 细节。
-- [ ] 为以下工具建立 contract fixture：
+- [x] 明确独立 FOFA MCP 使用 `fofa-mcp` stdio 入口，封装 transport-neutral
+      `McpCallClient`/注入客户端边界；Coordinator 不直接依赖 MCP SDK 细节。
+- [x] 为以下工具建立 contract fixture：
       `fofa_health`、`fofa_account_info`、`fofa_search`、
       `fofa_search_structured`、`fofa_search_next`、`fofa_stats`、`fofa_host`。
-- [ ] 健康检查分别记录：工具存在、版本、账号可用性、数据许可、网络出口、
+- [x] 健康检查分别记录：工具存在、版本、账号可用性、数据许可、网络出口、
       认证状态和成本能力；不可用时返回 `not_configured` 或 `failed`。
 - [ ] 真实调用仅允许在用户明确提供授权、凭据状态通过预检且任务不在
       `passive_only` 之外的允许范围内；开发和无凭据环境继续使用 fixture。
@@ -185,19 +192,20 @@ version 和时间窗口门控；新增 SQLite `budget` 表及事务性 reserve/c
 
 - [ ] 对域名、子域、IP、CIDR、ASN、证书 CN/SAN、组织和已确认资产生成查询
       计划；每条查询保存规范化输入、查询指纹、来源依据和预期字段。
-- [ ] 实现超长查询拆分，保留 `parent_query_id`、`batch_index`、拆分原因和
+- [x] 实现批次持久化基础，保留 `parent_query_id`、`batch_index`、拆分原因和
       合并顺序。
-- [ ] 每个批次有独立 action、idempotency key、重试预算、request id、成本、
+- [x] 每个批次有独立记录、恢复状态、request id、成本、
       返回字段和失败状态。
-- [ ] 无 `next_token` 时禁止调用 `fofa_search_next`；有 token 时必须持久化
+- [x] 无 `next_token` 时由 adapter 选择初始 search；有 token 时选择
+      `fofa_search_next`，cursor 可持久化后恢复。
       后再继续分页。
 - [ ] FOFA stats 只作为统计证据，不直接写入资产清单；host 结果必须与查询
       observation/evidence 关联。
 
 ### 2.3 恢复与质量
 
-- [ ] 中断后按 `query_fingerprint + batch_id + cursor` 恢复，不按内存页数猜测。
-- [ ] 已完成批次重启后跳过，不重复消耗；失败批次独立重试。
+- [x] 中断后可按 `query_fingerprint + batch_id + cursor` 恢复，不按内存页数猜测。
+- [x] 已完成批次状态和失败批次独立保存；重复 cursor 写入幂等。
 - [ ] 当前观察与历史资产分开保存，FOFA 历史结果不能覆盖当前状态。
 - [ ] 报告显示查询覆盖率、分页完成率、失败批次数、消耗和未覆盖字段。
 
