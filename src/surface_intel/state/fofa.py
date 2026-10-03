@@ -54,12 +54,14 @@ class FofaBatchRepository:
         next_token: str | None,
         cost_units: int,
         result_count: int,
+        finished: bool = True,
     ) -> bool:
         with self.db.connect() as connection:
             cursor = connection.execute(
-                """UPDATE fofa_query_batch SET status='completed',request_id=?,next_token=?,
+                """UPDATE fofa_query_batch SET status=?,request_id=?,next_token=?,
                    cost_units=?,result_count=? WHERE batch_id=? AND status='started'""",
-                (request_id, next_token, cost_units, result_count, batch_id),
+                ("completed" if finished else "started", request_id, next_token,
+                 cost_units, result_count, batch_id),
             )
             return cursor.rowcount == 1
 

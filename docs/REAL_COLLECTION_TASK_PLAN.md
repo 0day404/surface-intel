@@ -169,17 +169,27 @@ version 和时间窗口门控；新增 SQLite `budget` 表及事务性 reserve/c
 next token、成本、结果数量和单批失败隔离。`uv run pytest -q` 结果为
 `39 passed`。真实 stdio 会话、真实凭据和真实 FOFA 查询尚未运行。
 
+**R2 真实客户端增量实际验证**：新增 `StdioJsonRpcTransport`、
+`FofaStdioClient` 和 `run_fofa_query`；`fofa-health --real` 与
+`fofa-search --real --confirm-real` 是显式入口，后者要求已确认任务、授权域名
+且通过 batch/cursor runner。协议 fixture、分页、缺 token、恢复和 MCP 错误测试
+后总计 `43 passed`。当前没有使用真实凭据或真实授权目标，因此尚未执行真实
+FOFA smoke test。
+
 ## R2：FOFA 生产闭环
 
 **目标**：通过独立 FOFA MCP 适配器完成真实健康检查、查询、分页、游标、
    成本和失败批次恢复，不把 FOFA 逻辑写入 `fofa-mcp`。
 
-**状态**：进行中（2026-10-03，第一增量）。
+**状态**：进行中（2026-10-03，真实 stdio 客户端和查询 runner 已接入，等待受控
+授权 smoke test）。
 
 ### 2.1 MCP 契约和健康检查
 
 - [x] 明确独立 FOFA MCP 使用 `fofa-mcp` stdio 入口，封装 transport-neutral
       `McpCallClient`/注入客户端边界；Coordinator 不直接依赖 MCP SDK 细节。
+- [x] 实现真实 stdio JSON-RPC transport，支持 initialize、initialized、
+      tools/call、超时、进程关闭和结构化结果解包。
 - [x] 为以下工具建立 contract fixture：
       `fofa_health`、`fofa_account_info`、`fofa_search`、
       `fofa_search_structured`、`fofa_search_next`、`fofa_stats`、`fofa_host`。
