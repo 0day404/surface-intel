@@ -34,6 +34,8 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
     assets = 0
     if task["status"] in {TaskStatus.PAUSED.value, TaskStatus.CANCELLED.value}:
         raise ValueError(f"task_{task['status']}")
+    if task["status"] == TaskStatus.CORRELATING.value:
+        return {"task_id": task_id, "observations": 0, "assets": 0, "status": "already_completed"}
     with db.connect() as connection:
         connection.execute("UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (TaskStatus.COLLECTING_PASSIVE.value, task_id))
     actions = list(db.rows("SELECT * FROM action WHERE task_id=? AND status=?", (task_id, ActionStatus.PLANNED.value)))
