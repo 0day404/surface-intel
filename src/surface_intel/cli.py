@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import sys
+import uuid
+from pathlib import Path
+
+from . import SCHEMA_VERSION
+from .config import Config
+from .coordinator import run_offline_task
+from .logging import configure_logging
+from .normalization import normalize_targets
+from .planning import build_passive_plan, persist_actions, serialize_plan
+from .policy.scope import Scope
+from .state.database import Database
+from .reporting.export import build_report
+from .states import TaskStatus
+
+
+def _config(args: argparse.Namespace) -> Config:
+    return Config.from_task_root(args.task_root)
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    config = _config(args)
+    config.write()
+    db = Database(config.database_path)
+    db.initialize()
+    print(json.dumps({"ok": True, **db.health()}, ensure_ascii=True))
+    return 0
+
+
+def cmd_create(args: argparse.Namespace) -> int:
+    config = _config(args)
+    db = Database(config.database_path)
+    db.initialize()
+    task_id = f"task-{uuid.uuid4().hex[:16]}"
+    scope = json.loads(Path(args.scope).read_text(encoding="utf-8"))
+    confirmed = bool(scope.get("confirmed", False))
+    if not scope.get("authorized_targets") and not scope.get("authorized_domains") and not scope.get("authorized_ips"):
+        print(json.dumps({"ok": False, "error": "scope_has_no_authorized_target"}))
+        return 2
+    status = TaskStatus.CREATED if confirmed else TaskStatus.AWAITING_SCOPE
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO task(task_id,status,schema_version,scope_version) VALUES(?,?,?,?)",
+            (task_id, status.value, SCHEMA_VERSION, scope.get("scope_version", "scope-v0001")),
+        )
+        connection.execute(
+            "INSERT INTO scope_snapshot(scope_id,task_id,scope_version,payload_json,confirmed) VALUES(?,?,?,?,?)",
+            (f"scope-{uuid.uuid4().hex[:16]}", task_id, scope.get("scope_version", "scope-v0001"),
+             json.dumps(scope, ensure_ascii=True), int(confirmed)),
+        )
+    print(json.dumps({"ok": True, "task_id": task_id, "status": status.value}))
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    row = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    if row is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    print(json.dumps({"ok": True, "task": dict(row)}, ensure_ascii=True))
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    row = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    if row is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    scope = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=?", (args.task_id,)), None)
+    confirmed = bool(scope["confirmed"]) if scope else False
+    result = {
+        "ok": confirmed,
+        "task_id": args.task_id,
+        "status": "valid" if confirmed else "needs_review",
+        "external_calls_allowed": False if not confirmed else "not_implemented",
+    }
+    print(json.dumps(result, ensure_ascii=True))
+    return 0 if confirmed else 2
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)), None)
+    if task is None or scope_row is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    targets = list(scope.authorized_targets) + list(scope.authorized_domains) + list(scope.authorized_ips)
+    result = {
+        "ok": scope.confirmed and bool(targets),
+        "task_id": args.task_id,
+        "scope_version": scope.scope_version,
+        "normalized_targets": normalize_targets(targets),
+        "external_calls_allowed": False,
+        "reasons": [] if scope.confirmed else ["scope_not_confirmed"],
+    }
+    print(json.dumps(result, ensure_ascii=True))
+    return 0 if result["ok"] else 2
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)), None)
+    if task is None or scope_row is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    if not scope.confirmed:
+        print(json.dumps({"ok": False, "status": "blocked", "reason": "scope_not_confirmed"}))
+        return 2
+    targets = list(scope.authorized_targets) + list(scope.authorized_domains) + list(scope.authorized_ips)
+    plan = build_passive_plan(args.task_id, scope, targets)
+    inserted = persist_actions(db, args.task_id, scope, plan)
+    plan_path = _config(args).task_root / "plans"
+    plan_path.mkdir(parents=True, exist_ok=True)
+    (plan_path / f"plan-{scope.scope_version}.json").write_text(serialize_plan(plan), encoding="utf-8")
+    with db.connect() as connection:
+        connection.execute("UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (TaskStatus.PLANNED.value, args.task_id))
+    print(json.dumps({"ok": True, "task_id": args.task_id, "actions_inserted": inserted, "queries": len(plan)}))
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    try:
+        result = asyncio.run(run_offline_task(db, args.task_id))
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
+    print(json.dumps({"ok": True, **result}, ensure_ascii=True))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    try:
+        report = build_report(db, args.task_id, _config(args).task_root / "reports")
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
+    print(json.dumps({"ok": True, "integrity_status": report["integrity_status"], "export": report["export"]}, ensure_ascii=True))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="surface-intel")
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("report", cmd_report), ("status", cmd_status), ("validate", cmd_validate)):
+        command = sub.add_parser(name)
+        command.set_defaults(handler=handler)
+        if name == "init":
+            command.add_argument("task_root")
+        else:
+            command.add_argument("--task-root", required=True)
+        if name == "create":
+            command.add_argument("--input", required=False)
+            command.add_argument("--scope", required=True)
+        if name in {"status", "validate", "preflight", "plan", "run", "report"}:
+            command.add_argument("task_id")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    configure_logging()
+    return args.handler(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

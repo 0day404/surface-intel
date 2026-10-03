@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+import ipaddress
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from fnmatch import fnmatch
+from typing import Any
+
+from ..states import ActiveLevel
+
+
+@dataclass(frozen=True)
+class Scope:
+    authorized_targets: tuple[str, ...] = ()
+    authorized_domains: tuple[str, ...] = ()
+    authorized_ips: tuple[str, ...] = ()
+    authorized_cidrs: tuple[str, ...] = ()
+    excluded_targets: tuple[str, ...] = ()
+    active_testing_allowed: bool = False
+    active_testing_level: ActiveLevel = ActiveLevel.PASSIVE_ONLY
+    confirmed: bool = False
+    scope_version: str = "scope-v0001"
+    starts_at: str | None = None
+    ends_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Scope":
+        return cls(
+            **{
+                field: tuple(data.get(field, ())) if field not in {"active_testing_allowed", "active_testing_level", "confirmed", "scope_version", "starts_at", "ends_at"} else data.get(field, default)
+                for field, default in (
+                    ("authorized_targets", ()), ("authorized_domains", ()), ("authorized_ips", ()),
+                    ("authorized_cidrs", ()), ("excluded_targets", ()),
+                    ("active_testing_allowed", False), ("active_testing_level", ActiveLevel.PASSIVE_ONLY),
+                    ("confirmed", False), ("scope_version", "scope-v0001"), ("starts_at", None), ("ends_at", None),
+                )
+            }
+        )
+
+    def is_in_scope(self, value: str) -> bool:
+        candidate = value.strip().lower().rstrip(".")
+        if any(fnmatch(candidate, item.lower().rstrip(".")) for item in self.excluded_targets):
+            return False
+        if candidate in {item.lower().rstrip(".") for item in self.authorized_targets}:
+            return True
+        if any(fnmatch(candidate, item.lower().rstrip(".")) for item in self.authorized_domains):
+            return True
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            address = None
+        if address and any(address in ipaddress.ip_network(cidr) for cidr in self.authorized_cidrs):
+            return True
+        return candidate in {item.lower() for item in self.authorized_ips}
+
+    def is_action_allowed(self, *, target: str, active: bool = False) -> tuple[bool, str]:
+        if not self.confirmed:
+            return False, "scope_not_confirmed"
+        if not self.is_in_scope(target):
+            return False, "target_out_of_scope"
+        if active and (not self.active_testing_allowed or self.active_testing_level == ActiveLevel.PASSIVE_ONLY):
+            return False, "active_testing_not_authorized"
+        now = datetime.now(timezone.utc)
+        if self.starts_at and now < datetime.fromisoformat(self.starts_at):
+            return False, "outside_time_window"
+        if self.ends_at and now > datetime.fromisoformat(self.ends_at):
+            return False, "outside_time_window"
+        return True, "allowed"

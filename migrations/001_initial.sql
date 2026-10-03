@@ -1,0 +1,2 @@
+-- Applied by surface_intel.state.database.Database.initialize().
+-- SQLite schema version: 1.

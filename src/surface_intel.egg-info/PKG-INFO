@@ -1,0 +1,28 @@
+Metadata-Version: 2.4
+Name: surface-intel
+Version: 0.1.0
+Summary: Authorized attack-surface intelligence orchestration skill
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: openpyxl<4,>=3.1
+Requires-Dist: pydantic<3,>=2.0
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: pytest-asyncio<1,>=0.23; extra == "dev"
+
+# surface-intel
+
+`surface-intel` 是一个授权范围内的攻击面情报编排器。P0 只提供离线项目骨架、
+SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
+命令；不会访问真实目标、FOFA 或 Playwright。
+
+## 安装与验证
+
+```powershell
+uv sync --extra dev
+uv run pytest
+uv run surface-intel init .\task
+```
+
+未确认授权范围的任务会进入 `awaiting_scope`，`validate` 返回非零状态并禁止外部调用。
+FOFA 仅会通过后续的独立适配器引用 `E:\Work\Copilot\fofa-mcp`，不会复制或修改该项目。
