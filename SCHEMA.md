@@ -22,6 +22,13 @@ stats、host 和 account 操作的脱敏结果写入统一 evidence/observation 
 Migration 7 增加 `fofa_query_plan`，保存父查询、目标依据、预期字段和批次覆盖
 关系，使超长查询拆分、结果覆盖率和失败批次可以从 SQLite 重建。
 
+R3.1 无 migration 变化：DNS 观察复用 `evidence`/`observation` 索引（source 为
+`dns_resolver`），执行审计复用 `adapter_call`，预算复用 `budget` 表的
+`dns_resolver` kind。观察 payload 额外携带 `record_type`、`records`、`ttl`、
+`resolver`、`dnssec`、`resolved_at`、`resolution_ms`、`source_quality`、
+`license_status`、`scope_version`、`observed_at` 和 `related_scope_status`
+（`confirmed`/`candidate`/`not_applicable`）。
+
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
 `review_item`、`subtask` 和 `agent_lease`，并通过迁移演进。

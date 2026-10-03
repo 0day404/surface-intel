@@ -14,3 +14,11 @@ P5 命令：`checkpoint` 创建可恢复检查点，`recover` 将无终态的 `s
 R0 能力预检区分 `available`、`degraded`、`not_configured`、`unsupported` 和
 `failed`。状态不是 `available` 的适配器不能被当作真实成功来源；离线 Mock 必须在
 报告和能力矩阵中单独标识。
+
+R3.1 增加被动 DNS 入口：`dns-health --real` 只报告 resolver 配置，不查询目标；
+`dns-lookup` 要求 `--real --confirm-real`、已确认范围且域名在范围内。运行把任务
+置为 `collecting_passive`，逐记录类型经统一执行器执行（`adapter_call` 审计 +
+`dns_resolver` 预算），结果以 `completed`/`partial`/`failed` 收口。观察写入现有
+evidence/observation 表，带 `source_quality`、`license_status` 和
+`related_scope_status`；DNS 重复执行是合法的重新观察（新时间戳与 TTL），不按
+幂等键跳过。

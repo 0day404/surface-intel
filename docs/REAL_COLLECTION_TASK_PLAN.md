@@ -182,6 +182,15 @@ stats/host/account 操作的 evidence-only 记录。执行了
 `uv run surface-intel fofa-health --real`，外部 `fofa-mcp` stdio 进程成功返回
 健康配置结果；该工具不发起远程 FOFA 搜索。全套测试为 `46 passed`。
 
+**R3.1 第一增量实际验证**：新增 `DnsAdapter`（注入式 resolver client、记录类型
+白名单、NXDOMAIN/empty 定案观察与 servfail/timeout 基础设施失败分类）、真实
+`DnspythonResolverClient`（绝对名称、per-query timeout、EDNS0、AD 位记录）和
+`run_dns_lookup`（runner 级 scope 门控 + 统一执行器逐类型执行 + `adapter_call`
+审计 + `dns_resolver` 预算 + 单类型失败隔离聚合为 `partial`）。解析值只有自身
+授权才是 `confirmed`，否则 `candidate`，不递归解析。CLI 增加 `dns-health --real`
+与 `dns-lookup --real --confirm-real`。全套测试 `78 passed`；本增量只使用
+fixture client，未对任何真实目标发起 DNS 查询。
+
 真实搜索 smoke test 已在用户明确授权的
 `www.ceramtec-group.cn` 上执行。任务
 `task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
@@ -253,8 +262,8 @@ stats/host/account 操作的 evidence-only 记录。执行了
 
 ### 适配器
 
-- [ ] `DnsAdapter`：A/AAAA/CNAME/NS/MX/TXT/SOA，记录 TTL、解析时间、解析器、
-      DNSSEC/错误和超时；不得递归扩大到未授权域名。
+- [x] `DnsAdapter`：A/AAAA/CNAME/NS/MX/TXT/SOA，记录 TTL、解析时间、解析器、
+      DNSSEC/错误和超时；不得递归扩大到未授权域名。（2026-10-03 R3.1 第一增量）
 - [ ] `CertificateTransparencyAdapter`：证书 CN/SAN、issuer、serial、validity、
       log source、首次/最后观察；域名关系先标记 candidate，不能仅凭证书确认
       资产归属。

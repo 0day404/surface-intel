@@ -5,6 +5,7 @@ description = "Authorized attack-surface intelligence orchestration skill"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "dnspython>=2.6,<3",
     "openpyxl>=3.1,<4",
     "pydantic>=2.0,<3",
 ]

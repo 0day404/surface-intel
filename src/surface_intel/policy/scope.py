@@ -37,6 +37,22 @@ class Scope:
             }
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "authorized_targets": list(self.authorized_targets),
+            "authorized_domains": list(self.authorized_domains),
+            "authorized_ips": list(self.authorized_ips),
+            "authorized_cidrs": list(self.authorized_cidrs),
+            "excluded_targets": list(self.excluded_targets),
+            "active_testing_allowed": self.active_testing_allowed,
+            "active_testing_level": self.active_testing_level.value
+            if isinstance(self.active_testing_level, ActiveLevel) else str(self.active_testing_level),
+            "confirmed": self.confirmed,
+            "scope_version": self.scope_version,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+        }
+
     def is_in_scope(self, value: str) -> bool:
         candidate = value.strip().lower().rstrip(".")
         if any(fnmatch(candidate, item.lower().rstrip(".")) for item in self.excluded_targets):

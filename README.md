@@ -31,6 +31,18 @@ uv run surface-intel fofa-search --task-root .\task <task-id> --domain example.c
 受控环境读取，不进入 `surface-intel` 参数、SQLite 或报告。未配置或连接失败时
 返回 `not_configured`/失败状态，不伪造结果。
 
+R3.1 起真实被动 DNS 入口同样显式受控：
+
+```powershell
+uv run surface-intel dns-health --real
+uv run surface-intel dns-lookup --task-root .\task <task-id> --domain www.example.com --real --confirm-real
+```
+
+`dns-lookup` 要求任务范围已确认且域名在授权范围内；默认查询 A/AAAA/CNAME/NS/
+MX/TXT/SOA（`--types` 可收窄，白名单外类型被拒绝）。每个记录类型是独立动作，
+经统一执行器写入 `adapter_call` 审计并受任务 `dns_resolver` 预算约束。解析出的
+CNAME 目标、IP 和第三方域名只产生 `candidate` 观察，不会被递归解析或确认为资产。
+
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。
