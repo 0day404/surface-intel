@@ -53,6 +53,15 @@ User-Agent（通用 python-urllib UA 被 ctlogs.dev 403）。跨源共性：ctlo
 contains 类匹配噪声（如 `notexample.org` 匹配 `example.com` 查询）与 crt.sh
 一样会经匹配名分类升级为 `needs_review`，不产生 `confirmed`。
 
+R3.2 补充（自动故障转移）：`SURFACE_INTEL_CT_SOURCE` 默认 `auto`——
+`FailoverCtClient` 以 crt.sh 为主源、ctlogs.dev 为备源。仅当主源返回基础设施
+失败（rate_limited/timeout/http_error/invalid_response/transport 死亡）时才
+转移；定案结果（`observed`/`empty`）永远可信、不重查。转移后的 outcome 携带
+显式 `failover` 标记（`from`/`reason`/`primary_error`/`fallback`），adapter
+透传进 observation（含失败观察），evidence 来源始终可审计——不存在静默换源。
+`crtsh`/`ctlogs` 显式取值可锁定单一源（无转移）。转移在最坏情况下使单动作
+外部请求耗时翻倍（两源各一个超时窗口）；预算仍按动作记账。
+
 R3.3 增加 `RdapAdapter`（`rdap_lookup` 1.0，`passive_only`，注入式 lookup
 client）。目标种类白名单 domain/ip/asn（`TARGET_KINDS`）；观察保存注册组织、
 registrar、abuse 联系（仅 RDAP `abuse` 角色 vCard email）、事件时间

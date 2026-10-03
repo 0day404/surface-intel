@@ -79,13 +79,13 @@ class CertificateTransparencyAdapter:
             terminal = ActionStatus.TIMED_OUT.value if status == "timeout" else ActionStatus.FAILED.value
             return AdapterResult(
                 terminal,
-                observations=self._empty_observation(target, status),
+                observations=self._empty_observation(target, status, outcome=outcome),
                 error=status,
             )
         if status not in _DEFINITIVE_STATUSES:
             return AdapterResult(
                 ActionStatus.FAILED.value,
-                observations=self._empty_observation(target, status or "unknown_status"),
+                observations=self._empty_observation(target, status or "unknown_status", outcome=outcome),
                 error=f"invalid_client_status:{status}",
             )
         certificates = outcome.get("certificates")
@@ -99,6 +99,8 @@ class CertificateTransparencyAdapter:
             "log_source": outcome.get("log_source"),
             "queried_at": outcome.get("queried_at"),
             "query_ms": outcome.get("query_ms"),
+            # present only when a failover client switched sources upstream
+            "failover": outcome.get("failover"),
             "source": self.manifest.name,
         }
         return AdapterResult(
@@ -135,14 +137,19 @@ class CertificateTransparencyAdapter:
         }
 
     @staticmethod
-    def _empty_observation(target: str, status: str) -> list[dict[str, Any]]:
+    def _empty_observation(
+        target: str,
+        status: str,
+        outcome: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         return [{
             "target": target,
             "certificates": [],
             "matched_count": 0,
             "status": status,
-            "log_source": None,
-            "queried_at": None,
-            "query_ms": None,
+            "log_source": (outcome or {}).get("log_source"),
+            "queried_at": (outcome or {}).get("queried_at"),
+            "query_ms": (outcome or {}).get("query_ms"),
+            "failover": (outcome or {}).get("failover"),
             "source": CertificateTransparencyAdapter.manifest.name,
         }]

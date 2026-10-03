@@ -214,6 +214,16 @@ fetch、percent-encoded 查询、429→rate_limited、超时/坏响应结构化�
 `example.com` 做了一次真实连通性验证（17 行、首条完整回填），未接触任何
 用户授权目标。
 
+**R3.2 补充验证（自动故障转移）**：`SURFACE_INTEL_CT_SOURCE` 默认改为
+`auto`——`FailoverCtClient`（crt.sh 主源 + ctlogs.dev 备源）仅对基础设施
+失败（rate_limited/timeout/http_error/invalid_response/transport）转移，
+定案结果（observed/empty）不重查；转移后的 outcome/observation 携带显式
+`failover` 标记（from/reason/primary_error/fallback），失败观察同样保留，
+evidence 来源始终可审计（应用户要求把 R5 计划的故障转移提前，并以"标记
+可审计"取代此前拒绝的"静默换源"）。`crtsh`/`ctlogs` 仍可锁定单源。全套
+测试 `184 passed`（+13 故障转移契约）；实连验证：主源指向不可达端口时自动
+转移到 ctlogs.dev（observed 17 行，failover 标记 reason=timeout）。
+
 **R3.3 第一增量实际验证**：新增 `RdapAdapter`（`rdap_lookup` 1.0，目标种类
 白名单 domain/ip/asn，注入式 lookup client，规范化保存注册组织/registrar/
 abuse 联系/事件时间/CIDR/ASN 区间/country/nameservers）、真实

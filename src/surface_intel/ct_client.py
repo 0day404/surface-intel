@@ -38,6 +38,8 @@ class CrtShClient(CtLogClient):
     normalized certificate rows only.
     """
 
+    source_name = "crt.sh"
+
     def __init__(
         self,
         endpoint: str = DEFAULT_CT_ENDPOINT,
@@ -190,6 +192,8 @@ class CrtlogsDevClient(CtLogClient):
     match-only search row in place and never fails the search itself.
     """
 
+    source_name = "ctlogs.dev"
+
     def __init__(
         self,
         search_endpoint: str = DEFAULT_CTLOGS_SEARCH,
@@ -278,28 +282,91 @@ class CrtlogsDevClient(CtLogClient):
                 apply_ctlogs_detail(row, detail)
 
 
-def configured_ct_client(timeout: float = 30.0) -> CtLogClient:
-    """Build the real CT client; `SURFACE_INTEL_CT_SOURCE` picks the backend.
+class FailoverCtClient(CtLogClient):
+    """crt.sh first, ctlogs.dev on any non-definitive primary outcome.
 
-    `crtsh` (default): crt.sh JSON API, `SURFACE_INTEL_CT_ENDPOINT` overrides
-    the endpoint. `ctlogs`: ctlogs.dev, `SURFACE_INTEL_CT_API_KEY` sets a
-    Bearer key and `SURFACE_INTEL_CT_DETAIL_LIMIT` caps per-search detail
-    backfills (default 5). Unknown sources fail loudly rather than silently
-    falling back to the wrong data source.
+    Failover triggers only on infrastructure failures (rate_limited, timeout,
+    http_error, invalid_response, transport death) — definitive answers
+    (`observed`, `empty`) are always trusted and never re-queried. Every
+    switched outcome carries an explicit `failover` marker so stored evidence
+    keeps predictable provenance; nothing is ever switched silently.
+    """
+
+    source_name = "auto(crt.sh->ctlogs.dev)"
+
+    _DEFINITIVE = {"observed", "empty"}
+
+    def __init__(self, primary: CtLogClient, fallback: CtLogClient):
+        self._primary = primary
+        self._fallback = fallback
+
+    async def health(self) -> dict[str, Any]:
+        primary_health = await self._primary.health()
+        fallback_health = await self._fallback.health()
+        return {
+            "ok": bool(primary_health.get("ok") or fallback_health.get("ok")),
+            "strategy": "failover",
+            "source": self.source_name,
+            "primary": primary_health,
+            "fallback": fallback_health,
+            "adapter": "ct_log",
+        }
+
+    async def search(self, domain: str) -> dict[str, Any]:
+        try:
+            primary_outcome = await self._primary.search(domain)
+        except Exception as exc:  # defensive: clients normally map their own errors
+            primary_outcome = {"status": f"transport:{type(exc).__name__}"}
+        if primary_outcome.get("status") in self._DEFINITIVE:
+            return primary_outcome
+        marker = {
+            "from": getattr(self._primary, "source_name", "primary"),
+            "reason": str(primary_outcome.get("status")),
+            "primary_error": primary_outcome.get("error"),
+            "fallback": getattr(self._fallback, "source_name", "fallback"),
+        }
+        try:
+            fallback_outcome = await self._fallback.search(domain)
+        except Exception as exc:
+            fallback_outcome = {"status": f"transport:{type(exc).__name__}", "certificates": []}
+        return {**fallback_outcome, "failover": marker}
+
+
+def configured_ct_client(timeout: float = 30.0) -> CtLogClient:
+    """Build the real CT client; `SURFACE_INTEL_CT_SOURCE` picks the strategy.
+
+    `auto` (default): crt.sh primary with ctlogs.dev failover — switched
+    outcomes always carry an explicit `failover` marker in the observation.
+    `crtsh` / `ctlogs`: pin a single source (no failover). crt.sh endpoint
+    via `SURFACE_INTEL_CT_ENDPOINT`; ctlogs.dev via `SURFACE_INTEL_CT_API_KEY`
+    (Bearer) and `SURFACE_INTEL_CT_DETAIL_LIMIT` (default 5). Unknown sources
+    fail loudly rather than silently falling back to the wrong data source.
     """
     source = os.environ.get("SURFACE_INTEL_CT_SOURCE", "").strip().lower()
-    if source in {"", "crtsh"}:
+    if source in {"", "auto"}:
+        return FailoverCtClient(
+            CrtShClient(
+                endpoint=os.environ.get("SURFACE_INTEL_CT_ENDPOINT", "").strip() or DEFAULT_CT_ENDPOINT,
+                timeout=timeout,
+            ),
+            _configured_ctlogs_client(timeout),
+        )
+    if source == "crtsh":
         endpoint = os.environ.get("SURFACE_INTEL_CT_ENDPOINT", "").strip() or DEFAULT_CT_ENDPOINT
         return CrtShClient(endpoint=endpoint, timeout=timeout)
     if source == "ctlogs":
-        api_key = os.environ.get("SURFACE_INTEL_CT_API_KEY", "").strip() or None
-        raw_limit = os.environ.get("SURFACE_INTEL_CT_DETAIL_LIMIT", "").strip()
-        try:
-            detail_limit = int(raw_limit) if raw_limit else 5
-        except ValueError:
-            raise ValueError("invalid_ct_detail_limit") from None
-        return CrtlogsDevClient(timeout=timeout, api_key=api_key, detail_limit=detail_limit)
+        return _configured_ctlogs_client(timeout)
     raise ValueError(f"unknown_ct_source:{source}")
+
+
+def _configured_ctlogs_client(timeout: float) -> CrtlogsDevClient:
+    api_key = os.environ.get("SURFACE_INTEL_CT_API_KEY", "").strip() or None
+    raw_limit = os.environ.get("SURFACE_INTEL_CT_DETAIL_LIMIT", "").strip()
+    try:
+        detail_limit = int(raw_limit) if raw_limit else 5
+    except ValueError:
+        raise ValueError("invalid_ct_detail_limit") from None
+    return CrtlogsDevClient(timeout=timeout, api_key=api_key, detail_limit=detail_limit)
 
 
 def _now() -> str:

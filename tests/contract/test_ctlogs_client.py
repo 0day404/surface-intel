@@ -244,9 +244,10 @@ def test_apply_ctlogs_detail_ignores_malformed_sections():
 
 def test_configured_ct_client_switches_source_via_env(monkeypatch):
     monkeypatch.delenv("SURFACE_INTEL_CT_SOURCE", raising=False)
-    from surface_intel.ct_client import CrtShClient
+    from surface_intel.ct_client import CrtShClient, FailoverCtClient
 
-    assert isinstance(configured_ct_client(), CrtShClient)
+    # default is now failover (crt.sh primary, ctlogs.dev fallback)
+    assert isinstance(configured_ct_client(), FailoverCtClient)
 
     monkeypatch.setenv("SURFACE_INTEL_CT_SOURCE", "ctlogs")
     client = configured_ct_client()
