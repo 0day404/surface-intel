@@ -48,3 +48,11 @@ class IntegrityStatus(StrEnum):
     PARTIAL = "partial"
     FAILED = "failed"
     UNKNOWN = "unknown"
+
+
+class CapabilityStatus(StrEnum):
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    NOT_CONFIGURED = "not_configured"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"

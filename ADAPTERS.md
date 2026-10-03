@@ -9,6 +9,10 @@ P4 增加 `CapabilityRegistry`，每个适配器必须声明能力、所需主�
 恢复/取消能力、外部副作用、重试和敏感数据策略。`SafeHttpAdapter` 仅允许授权上下文
 中的 GET 观察；`SafePortAdapter` 仅允许授权端口验证，拒绝端口范围扫描。
 
+适配器 manifest 还声明能力状态：`available`、`degraded`、`not_configured`、
+`unsupported` 或 `failed`。Registry 会拒绝无效 manifest，并在非 `available` 状态
+下阻止能力检查通过。Mock 适配器只表示离线 fixture 能力，不代表对应真实数据源可用。
+
 P6 增加 `PlaywrightAdapter`。它只封装外部 MCP 调用，启动命令为
 `npx -y @playwright/mcp@latest`；未配置时返回 `unknown/not_configured`。只允许授权
 域名的公开页面观察，自动阻止第三方域名、登录、状态变更和下载。

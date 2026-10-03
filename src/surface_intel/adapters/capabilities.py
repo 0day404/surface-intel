@@ -15,9 +15,14 @@ class CapabilityCheck:
 
 class CapabilityRegistry:
     def __init__(self, manifests: Iterable[AdapterManifest] = ()):
-        self._manifests = {manifest.name: manifest for manifest in manifests}
+        self._manifests: dict[str, AdapterManifest] = {}
+        for manifest in manifests:
+            self.register(manifest)
 
     def register(self, manifest: AdapterManifest) -> None:
+        errors = manifest.validate()
+        if errors:
+            raise ValueError("invalid_adapter_manifest:" + ",".join(errors))
         self._manifests[manifest.name] = manifest
 
     def get(self, name: str) -> AdapterManifest | None:
@@ -35,6 +40,8 @@ class CapabilityRegistry:
         if manifest is None:
             return CapabilityCheck(name, False, ("adapter_not_registered",))
         reasons: list[str] = []
+        if manifest.capability_status != "available":
+            reasons.append(f"adapter_{manifest.capability_status}")
         if capability not in manifest.capabilities:
             reasons.append("capability_not_supported")
         levels = ("passive_only", "safe_discovery", "safe_probe", "intrusive_test")
@@ -58,6 +65,7 @@ class CapabilityRegistry:
                 "external_side_effects": item.external_side_effects,
                 "retry_policy": item.retry_policy,
                 "sensitive_data_policy": item.sensitive_data_policy,
+                "capability_status": item.capability_status,
             }
             for item in self._manifests.values()
         ]

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from ..states import CapabilityStatus
+
 
 @dataclass(frozen=True)
 class AdapterManifest:
@@ -17,6 +19,24 @@ class AdapterManifest:
     external_side_effects: bool = False
     retry_policy: str = "none"
     sensitive_data_policy: str = "redact_and_reject"
+    capability_status: str = CapabilityStatus.AVAILABLE.value
+
+    def validate(self) -> tuple[str, ...]:
+        errors: list[str] = []
+        if not self.name.strip():
+            errors.append("name_required")
+        if not self.version.strip():
+            errors.append("version_required")
+        if not self.capabilities:
+            errors.append("capabilities_required")
+        valid_levels = {"passive_only", "safe_discovery", "safe_probe", "intrusive_test"}
+        if self.required_active_level not in valid_levels:
+            errors.append("invalid_required_active_level")
+        if self.cost_units < 0:
+            errors.append("cost_units_must_be_non_negative")
+        if self.capability_status not in {item.value for item in CapabilityStatus}:
+            errors.append("invalid_capability_status")
+        return tuple(errors)
 
 
 @dataclass

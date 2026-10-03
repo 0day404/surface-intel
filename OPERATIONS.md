@@ -10,3 +10,7 @@ P5 命令：`checkpoint` 创建可恢复检查点，`recover` 将无终态的 `s
 委派任务通过 `subtask` 和 `agent_lease` 持久化。租约过期会将运行中子任务标记为
 `timed_out`；心跳只能延长仍未过期的活动租约。结果使用 `idempotency_key`，重复提交
 返回已有结果，不重复写入。子 Agent 不能直接修改全局资产、预算或任务完成状态。
+
+R0 能力预检区分 `available`、`degraded`、`not_configured`、`unsupported` 和
+`failed`。状态不是 `available` 的适配器不能被当作真实成功来源；离线 Mock 必须在
+报告和能力矩阵中单独标识。

@@ -2,6 +2,10 @@
 
 当前 schema version 为 `1.0`，SQLite migration version 为 `3`。
 
+适配器能力状态使用 `available`、`degraded`、`not_configured`、`unsupported`
+和 `failed`。能力状态是预检和报告字段；`not_configured`、`unsupported` 或
+`failed` 不能被替换成 Mock 成功结果后继续声明真实能力。
+
 实体：`task`、`scope_snapshot`、`action`、`event`、`checkpoint`、`adapter_registry`、
 `evidence`、`observation`、`asset`、`gap`。migration 2 为动作恢复增加
 `attempt`、`started_at`、`completed_at`、`error_code`。
