@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 from .adapters.base import AdapterResult
@@ -12,8 +9,8 @@ from .adapters.capabilities import CapabilityRegistry
 from .adapters.ct import CertificateTransparencyAdapter
 from .execution import AdapterExecutor, ExecutionContext
 from .policy.scope import Scope
-from .redaction import redact
 from .state.database import Database
+from .state.observations import store_unified_observations
 
 
 @dataclass(frozen=True)
@@ -64,34 +61,18 @@ def _store_ct_observations(
     scope: Scope,
     result: AdapterResult,
 ) -> int:
-    observed_at = datetime.now(timezone.utc).isoformat()
-    stored = 0
-    with db.connect() as connection:
-        for item in result.observations:
-            payload = redact(dict(item))
-            payload["scope_version"] = scope.scope_version
-            payload["observed_at"] = observed_at
-            payload["source_quality"] = "direct"
-            payload["license_status"] = "public_ct_log"
-            payload["related_scope_status"] = classify_certificates_scope(
+    def metadata_for(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source_quality": "direct",
+            "license_status": "public_ct_log",
+            "related_scope_status": classify_certificates_scope(
                 scope, list(payload.get("certificates", []))
-            )
-            raw = json.dumps(payload, ensure_ascii=True, sort_keys=True)
-            evidence_id = f"evidence-{uuid.uuid4().hex[:16]}"
-            connection.execute(
-                """INSERT INTO evidence(evidence_id,task_id,source,summary,sha256,redaction_status)
-                   VALUES(?,?,?,?,?,?)""",
-                (evidence_id, task_id, "ct_log", raw[:500],
-                 hashlib.sha256(raw.encode()).hexdigest(), "redacted"),
-            )
-            connection.execute(
-                """INSERT INTO observation(observation_id,task_id,source,target,payload_json,evidence_id)
-                   VALUES(?,?,?,?,?,?)""",
-                (f"observation-{uuid.uuid4().hex[:16]}", task_id, "ct_log",
-                 str(payload.get("target", "")), raw, evidence_id),
-            )
-            stored += 1
-    return stored
+            ),
+        }
+
+    return store_unified_observations(
+        db, task_id, scope, result, source="ct_log", metadata_for=metadata_for,
+    )
 
 
 async def run_ct_search(

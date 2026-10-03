@@ -50,6 +50,15 @@ asn）、`record`（`handle`、`name`、`country`、`organizations`、`registrar
 `related_scope_status`（`candidate`/`not_applicable`——注册数据绝不产生
 `confirmed`）。
 
+R3.4 统一收口：三个被动源的观察写入合并到
+`state/observations.store_unified_observations`，契约键为
+`UNIFIED_METADATA_KEYS`（`scope_version`、`observed_at`、`source_quality`、
+`license_status`、`related_scope_status`），所有 `dns_resolver`/`ct_log`/
+`rdap_lookup` 观察一律经过脱敏（`redact`）后写 `evidence`（redaction_status=
+`redacted`，sha256 摘要）与 `observation`；原始响应体从不进入普通日志（日志端
+`RedactingFormatter` 兜底）。跨源元数据契约、冲突共存、定案否定、超时/限流和
+许可不可用由 `tests/integration/test_r3_multisource.py` 统一约束。
+
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
 `review_item`、`subtask` 和 `agent_lease`，并通过迁移演进。

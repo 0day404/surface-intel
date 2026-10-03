@@ -216,6 +216,18 @@ client 调用之前 + 统一执行器单动作 + `adapter_call` 审计 + `rdap_l
 `rdap-lookup --real --confirm-real`。全套测试 `145 passed`；本增量全部使用
 fixture/注入 transport，未发起任何真实网络请求。
 
+**R3.4 多源统一实际验证**：三个被动源的观察存储合并为
+`state/observations.store_unified_observations`（统一 metadata 契约键
+`UNIFIED_METADATA_KEYS`：scope_version/observed_at/source_quality/
+license_status/related_scope_status；redact 后写 evidence/observation，原始
+响应体不进普通日志）。新增 `tests/integration/test_r3_multisource.py` 跨源
+矩阵：统一元数据契约、冲突共存（DNS/CT/RDAP 对同一目标的数据冲突原样保留、
+不静默裁决）、定案否定统一（nxdomain/empty/not_found → not_applicable）、
+超时/限流统一失败路径、来源或许可不可用时 capability 门控在任何 client 调用
+之前阻断、审计输入摘要脱敏。全套测试 `151 passed`；本增量无网络请求、无
+migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此完成，下一步
+进入 R4 资产归并（届时以归并依据放开 ASN 绑定直查）。
+
 真实搜索 smoke test 已在用户明确授权的
 `www.ceramtec-group.cn` 上执行。任务
 `task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
@@ -295,8 +307,8 @@ fixture/注入 transport，未发起任何真实网络请求。
 - [x] `RdapAdapter`：注册组织、网络、ASN、CIDR、abuse 联系信息和查询时间；
       WHOIS fallback 必须明确数据质量和许可状态。（2026-10-03 R3.3 第一增量；
       ASN 数据结构已支持，直查门控待 R4 绑定）
-- [ ] 所有适配器输出统一 observation、evidence metadata 和 source quality，
-      不把原始敏感响应直接放入普通日志。
+- [x] 所有适配器输出统一 observation、evidence metadata 和 source quality，
+      不把原始敏感响应直接放入普通日志。（2026-10-03 R3.4 统一收口）
 
 ### 计划和限界
 
