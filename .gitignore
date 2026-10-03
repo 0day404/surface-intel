@@ -7,3 +7,4 @@ task.sqlite-*
 reports/
 evidence/
 runtime/
+tmp_debug/
