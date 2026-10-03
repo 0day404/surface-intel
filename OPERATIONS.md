@@ -45,8 +45,15 @@ R3.3 增加被动注册数据入口：`rdap-health --real` 只报告端点配置
 器执行（`adapter_call` 审计 + `rdap_lookup` 预算），结果以
 `completed`/`failed`/`blocked` 收口。默认端点 `https://rdap.org/`，可用
 `SURFACE_INTEL_RDAP_ENDPOINT` 覆盖；TLD 无 RDAP 时自动回退 WHOIS（端口 43，
-`whois_text_unverified` 许可标记）。ASN 直查被 `asn_scope_binding_deferred` 拒绝
-（R4 归并层提供绑定依据后放开）；重复执行是合法重新观察。
+`whois_text_unverified` 许可标记）；重复执行是合法重新观察。
+
+R4.3 放开 ASN 直查：`rdap-lookup --kind asn` 在两种依据下放行——(a) 范围文档
+显式授权（`authorized_asns`）；(b) R4 归并绑定：任务中存在 `rdap_asn` 关系且
+来源资产 scope confirmed（即该 ASN 由授权目标自身的注册记录揭示）。无依据时
+拒绝（`asn_binding_not_found`）。绑定路径下动作的 scope 检查目标为 in-scope
+锚点资产，ASN 经 `lookup_target` 携带，两者都进入 `adapter_call` 审计；观察
+`target` 记录被查 ASN、`scope_anchor` 记录锚点。ASN 数据仍只能产生 candidate
+归属，组织名/ASN 相同绝不确认资产。
 
 R4.1 增加离线归并入口：`surface-intel merge <task-id> --task-root .\task` 读取
 任务全部 observation（当前覆盖 dns_resolver/ct_log/rdap_lookup，其他来源计入

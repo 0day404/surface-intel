@@ -68,8 +68,8 @@ uv run surface-intel rdap-lookup --task-root .\task <task-id> --target 203.0.113
 IP 的注册组织、网络、CIDR、abuse 联系和事件时间；TLD 无 RDAP 服务时回退
 WHOIS（端口 43，只提取白名单字段），回退结果明确标记
 `whois_fallback`/`whois_text_unverified`。注册数据只能产生 `candidate` 归属
-关系——组织名或 ASN 相同绝不确认资产归属；ASN 直查在 R4 归并层提供绑定依据前
-被拒绝。
+关系——组织名或 ASN 相同绝不确认资产归属。ASN 直查需范围文档 `authorized_asns`
+显式授权，或 R4 归并绑定（ASN 由授权目标自身的注册记录揭示）。
 
 R4.1 起提供离线资产归并：`surface-intel merge <task-id> --task-root .\task`
 把 DNS/CT/RDAP 观察幂等归并为统一资产模型（domain/ip/cidr/asn/organization、

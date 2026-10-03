@@ -428,7 +428,9 @@ def cmd_rdap_lookup(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
         return 2
     scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
-    if not scope.is_in_scope(args.target):
+    if kind != "asn" and not scope.is_in_scope(args.target):
+        # ASN authorization (authorized_asns entries or a merge binding) is
+        # decided inside the runner
         print(json.dumps({"ok": False, "error": "target_out_of_scope"}))
         return 2
     with db.connect() as connection:

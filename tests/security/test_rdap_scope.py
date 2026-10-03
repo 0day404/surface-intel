@@ -83,15 +83,32 @@ async def test_out_of_scope_domain_and_ip_block_before_client_call(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_asn_kind_blocked_until_scope_binding_exists(tmp_path):
+async def test_unbound_asn_blocked_until_scope_or_binding_exists(tmp_path):
+    """Neither an authorized_asns entry nor a merge binding: refused pre-call."""
     scope = _scope()
     db = _setup(tmp_path, scope)
     client = SpyRdapClient(_record())
     result = await run_rdap_lookup(db, client, task_id="t", scope=scope, target="64512", kind="asn")
     assert result.status == "blocked"
-    assert result.error == "asn_scope_binding_deferred"
+    assert result.error == "asn_binding_not_found"
     assert client.calls == []
     assert list(db.rows("SELECT 1 FROM observation")) == []
+
+
+@pytest.mark.asyncio
+async def test_user_authorized_asn_passes_via_scope(tmp_path):
+    authorized = Scope(
+        authorized_domains=("example.com", "*.example.com"),
+        authorized_ips=("203.0.113.5",),
+        authorized_asns=("AS64512",),
+        confirmed=True,
+        scope_version="scope-v1",
+    )
+    db = _setup(tmp_path, authorized)
+    client = SpyRdapClient(_record(asn_start=64512, asn_end=64512))
+    result = await run_rdap_lookup(db, client, task_id="t", scope=authorized, target="64512", kind="asn")
+    assert result.status == "completed"
+    assert client.calls == [("64512", "asn")]
 
 
 @pytest.mark.asyncio

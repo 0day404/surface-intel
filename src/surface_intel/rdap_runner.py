@@ -54,7 +54,33 @@ def _target_in_scope(scope: Scope, target: str, kind: str) -> bool:
         return scope.is_in_scope(target)
     if kind == "ip":
         return scope.is_in_scope(target)  # matches authorized_ips or authorized_cidrs
+    if kind == "asn":
+        return scope.is_in_scope(target)  # matches authorized_asns when present
     return False
+
+
+def _asn_merge_binding(db: Database, task_id: str, asn_value: str) -> tuple[str, str] | None:
+    """Merge-layer binding basis for an ASN lookup (the R4 promise from R3.3).
+
+    A binding exists when the task's merged relations tie the ASN to a
+    scope-confirmed asset via an `rdap_asn` relation - i.e. the ASN was
+    surfaced by an authorized target's own registration record, not by
+    guesswork. Returns (relation_id, anchor_value).
+    """
+    rows = list(db.rows(
+        """SELECT r.relation_id, src.normalized_value AS anchor_value
+           FROM asset_relation r
+           JOIN asset src ON src.asset_id = r.from_asset_id
+           JOIN asset dst ON dst.asset_id = r.to_asset_id
+           WHERE r.task_id=? AND r.relation_type='rdap_asn'
+             AND src.scope_status='confirmed'
+             AND dst.asset_type='asn' AND dst.normalized_value=?
+           ORDER BY r.rowid LIMIT 1""",
+        (task_id, asn_value),
+    ))
+    if not rows:
+        return None
+    return rows[0]["relation_id"], rows[0]["anchor_value"]
 
 
 async def run_rdap_lookup(
@@ -66,14 +92,15 @@ async def run_rdap_lookup(
     target: str,
     kind: str,
 ) -> RdapRunResult:
-    """Passive registration lookup for one authorized domain or IP, one action.
+    """Passive registration lookup for one authorized domain, IP or ASN, one action.
 
-    Gates before any client call: confirmed scope and target in scope (IPs
-    must be listed or inside an authorized CIDR). ASN lookups are refused at
-    the runner until R4 provides attribution binding — an ASN is never
-    authorized by the scope document alone. Registration records are stored as
-    observations whose attribution relations stay `candidate`: organization or
-    ASN equality never confirms ownership.
+    Gates before any client call: confirmed scope and target authorization.
+    Domains and IPs must be in scope. ASN lookups are authorized by either an
+    explicit `authorized_asns` scope entry or an R4 merge binding (`rdap_asn`
+    relation from a scope-confirmed asset); unbound ASNs are refused with
+    `asn_binding_not_found`. Registration records are stored as observations
+    whose attribution relations stay `candidate`: organization or ASN equality
+    never confirms ownership.
     """
     normalized_target = target.strip().rstrip(".").lower()
     normalized_kind = str(kind).strip().lower()
@@ -81,10 +108,26 @@ async def run_rdap_lookup(
         return RdapRunResult("blocked", 0, error="invalid_target_kind")
     if not scope.confirmed:
         return RdapRunResult("blocked", 0, error="scope_not_confirmed")
-    if normalized_kind == "asn":
-        return RdapRunResult("blocked", 0, error="asn_scope_binding_deferred")
+
+    action = {
+        "action_id": _action_id(normalized_kind, normalized_target),
+        "target": normalized_target,
+        "kind": normalized_kind,
+    }
     if not _target_in_scope(scope, normalized_target, normalized_kind):
-        return RdapRunResult("blocked", 0, error="target_out_of_scope")
+        if normalized_kind != "asn":
+            return RdapRunResult("blocked", 0, error="target_out_of_scope")
+        # ASN: authorized either by explicit authorized_asns scope entries
+        # (already in scope) or by an R4 merge binding from a confirmed asset.
+        binding = _asn_merge_binding(db, task_id, normalized_target.removeprefix("as"))
+        if binding is None:
+            return RdapRunResult("blocked", 0, error="asn_binding_not_found")
+        relation_id, anchor_value = binding
+        # The scope-checked action target stays the in-scope anchor; the ASN
+        # rides `lookup_target`. Both are visible in the adapter_call audit.
+        action["target"] = anchor_value
+        action["lookup_target"] = normalized_target
+        action["scope_basis"] = f"merge_binding:{relation_id}"
 
     adapter = RdapAdapter(client)
     registry = CapabilityRegistry([adapter.manifest])
@@ -96,13 +139,8 @@ async def run_rdap_lookup(
         metadata={"scope_payload": scope.to_dict()},
     )
 
-    action = {
-        "action_id": _action_id(normalized_kind, normalized_target),
-        "target": normalized_target,
-        "kind": normalized_kind,
-        "capability": "rdap_lookup",
-        "budget_kind": adapter.manifest.name,
-    }
+    action["capability"] = "rdap_lookup"
+    action["budget_kind"] = adapter.manifest.name
     result = await executor.execute(adapter, action, context)
     stored = _store_rdap_observations(db, task_id, scope, result)
     if result.status == "completed":

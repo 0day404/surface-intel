@@ -328,7 +328,7 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
       资产归属。（2026-10-03 R3.2 第一增量）
 - [x] `RdapAdapter`：注册组织、网络、ASN、CIDR、abuse 联系信息和查询时间；
       WHOIS fallback 必须明确数据质量和许可状态。（2026-10-03 R3.3 第一增量；
-      ASN 数据结构已支持，直查门控待 R4 绑定）
+      ASN 直查已于 R4.3 以归并绑定/authorized_asns 放开）
 - [x] 所有适配器输出统一 observation、evidence metadata 和 source quality，
       不把原始敏感响应直接放入普通日志。（2026-10-03 R3.4 统一收口）
 

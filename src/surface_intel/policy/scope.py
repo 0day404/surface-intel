@@ -9,12 +9,18 @@ from typing import Any
 from ..states import ActiveLevel
 
 
+def _normalized_asn(value: str) -> str | None:
+    cleaned = str(value or "").strip().upper().removeprefix("AS")
+    return cleaned if cleaned.isdigit() else None
+
+
 @dataclass(frozen=True)
 class Scope:
     authorized_targets: tuple[str, ...] = ()
     authorized_domains: tuple[str, ...] = ()
     authorized_ips: tuple[str, ...] = ()
     authorized_cidrs: tuple[str, ...] = ()
+    authorized_asns: tuple[str, ...] = ()
     excluded_targets: tuple[str, ...] = ()
     active_testing_allowed: bool = False
     active_testing_level: ActiveLevel = ActiveLevel.PASSIVE_ONLY
@@ -30,7 +36,7 @@ class Scope:
                 field: tuple(data.get(field, ())) if field not in {"active_testing_allowed", "active_testing_level", "confirmed", "scope_version", "starts_at", "ends_at"} else data.get(field, default)
                 for field, default in (
                     ("authorized_targets", ()), ("authorized_domains", ()), ("authorized_ips", ()),
-                    ("authorized_cidrs", ()), ("excluded_targets", ()),
+                    ("authorized_cidrs", ()), ("authorized_asns", ()), ("excluded_targets", ()),
                     ("active_testing_allowed", False), ("active_testing_level", ActiveLevel.PASSIVE_ONLY),
                     ("confirmed", False), ("scope_version", "scope-v0001"), ("starts_at", None), ("ends_at", None),
                 )
@@ -43,6 +49,7 @@ class Scope:
             "authorized_domains": list(self.authorized_domains),
             "authorized_ips": list(self.authorized_ips),
             "authorized_cidrs": list(self.authorized_cidrs),
+            "authorized_asns": list(self.authorized_asns),
             "excluded_targets": list(self.excluded_targets),
             "active_testing_allowed": self.active_testing_allowed,
             "active_testing_level": self.active_testing_level.value
@@ -60,6 +67,11 @@ class Scope:
         if candidate in {item.lower().rstrip(".") for item in self.authorized_targets}:
             return True
         if any(fnmatch(candidate, item.lower().rstrip(".")) for item in self.authorized_domains):
+            return True
+        candidate_asn = _normalized_asn(candidate)
+        if candidate_asn is not None and candidate_asn in {
+            _normalized_asn(item) for item in self.authorized_asns
+        }:
             return True
         try:
             address = ipaddress.ip_address(candidate)

@@ -64,9 +64,12 @@ class RdapAdapter:
 
     async def execute(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
         target = str(action.get("target", "")).strip().rstrip(".").lower()
+        # ASN lookups anchored by a merge binding query the bound ASN while the
+        # scope-checked action target stays the in-scope anchor asset.
+        lookup_target = str(action.get("lookup_target", "")).strip().rstrip(".").lower() or target
         kind = str(action.get("kind", "")).strip().lower()
         try:
-            outcome = await self.client.lookup(target, kind)
+            outcome = await self.client.lookup(lookup_target, kind)
         except TimeoutError:
             return AdapterResult(
                 ActionStatus.TIMED_OUT.value,
@@ -95,11 +98,12 @@ class RdapAdapter:
             )
         record = outcome.get("record") if isinstance(outcome.get("record"), dict) else {}
         observation = {
-            "target": target,
+            "target": lookup_target,
             "target_kind": kind,
             "record": record,
             "status": status,
             "source_protocol": outcome.get("source_protocol"),
+            "scope_anchor": target if lookup_target != target else None,
             "queried_at": outcome.get("queried_at"),
             "query_ms": outcome.get("query_ms"),
             "source": self.manifest.name,
@@ -108,7 +112,7 @@ class RdapAdapter:
             ActionStatus.COMPLETED.value,
             observations=[observation],
             cost_units=1,
-            request_id=f"rdap-{context.task_id}-{kind}-{target}",
+            request_id=f"rdap-{context.task_id}-{kind}-{lookup_target}",
         )
 
     async def cancel(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
