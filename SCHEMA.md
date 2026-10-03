@@ -29,6 +29,15 @@ R3.1 无 migration 变化：DNS 观察复用 `evidence`/`observation` 索引（s
 `license_status`、`scope_version`、`observed_at` 和 `related_scope_status`
 （`confirmed`/`candidate`/`not_applicable`）。
 
+R3.2 同样无 migration 变化：CT 观察复用 `evidence`/`observation`（source 为
+`ct_log`），执行审计复用 `adapter_call`，预算复用 `budget` 表的 `ct_log` kind。
+观察 payload 额外携带 `target`、`certificates`（每行 `common_name`、`sans`、
+`issuer`、`serial`、`not_before`、`not_after`、`first_seen`、`last_seen`、
+`log_id`、`log_source`）、`matched_count`、`log_source`、`queried_at`、
+`query_ms`、`source_quality`、`license_status`、`scope_version`、`observed_at` 和
+`related_scope_status`（`candidate`/`needs_review`/`not_applicable`——CT 匹配
+单独绝不产生 `confirmed`）。
+
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
 `review_item`、`subtask` 和 `agent_lease`，并通过迁移演进。

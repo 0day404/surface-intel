@@ -28,3 +28,15 @@ per-query timeout、EDNS0；nameserver 可用 `SURFACE_INTEL_DNS_NAMESERVERS` �
 运行经 `AdapterExecutor` 逐类型执行，写入 `adapter_call` 审计与预算；解析出的
 IP/CNAME/NS/MX 值只有自身在授权范围内才是 `confirmed`，否则保持 `candidate`，
 绝不递归解析第三方目标。
+
+R3.2 增加 `CertificateTransparencyAdapter`（`ct_log` 1.0，`passive_only`，注入式
+CT log client）。每次查询保存证书的 CN、SAN、issuer、serial、validity
+（not_before/not_after）、log source、first_seen/last_seen 和 crt.sh log id。
+SAN 只产生候选关系：所有名称都在授权范围内时观察仍为 `candidate`，任何第三方或
+范围外域名（含 CN）把观察升级为 `needs_review`；通配符 SAN 按去掉 `*.` 的基础域
+判定。CT 观察绝不创建 `confirmed` 资产或 `confirmed_direct` 关系。observed/empty
+是定案结果（动作 `completed`）；rate_limited/http_error/timeout 属基础设施失败
+（动作 `failed`/`timed_out`）。真实 client 是 `ct_client.CrtShClient`（crt.sh JSON
+API，`SURFACE_INTEL_CT_ENDPOINT` 可覆盖端点）；URL 参数经 percent-encoding 防注入，
+原始响应体不落盘不进日志，只持久化规范化证书行。health 只报告端点配置，不发起
+网络请求。

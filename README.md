@@ -43,6 +43,18 @@ MX/TXT/SOA（`--types` 可收窄，白名单外类型被拒绝）。每个记录
 经统一执行器写入 `adapter_call` 审计并受任务 `dns_resolver` 预算约束。解析出的
 CNAME 目标、IP 和第三方域名只产生 `candidate` 观察，不会被递归解析或确认为资产。
 
+R3.2 起真实被动 CT 入口同样显式受控：
+
+```powershell
+uv run surface-intel ct-health --real
+uv run surface-intel ct-search --task-root .\task <task-id> --domain example.com --real --confirm-real
+```
+
+`ct-search` 查询证书透明度日志（默认 crt.sh，`SURFACE_INTEL_CT_ENDPOINT` 可覆盖），
+保存 CN、SAN、issuer、serial、validity、log source 和 first_seen/last_seen。
+证书 SAN 只产生 `candidate` 关系，任何第三方或范围外域名都会把观察升级为
+`needs_review`；CT 匹配单独绝不确认资产归属。
+
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。

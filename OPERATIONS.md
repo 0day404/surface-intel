@@ -22,3 +22,13 @@ R3.1 增加被动 DNS 入口：`dns-health --real` 只报告 resolver 配置，�
 evidence/observation 表，带 `source_quality`、`license_status` 和
 `related_scope_status`；DNS 重复执行是合法的重新观察（新时间戳与 TTL），不按
 幂等键跳过。
+
+R3.2 增加被动 CT 入口：`ct-health --real` 只报告端点配置，不发起网络请求；
+`ct-search` 要求 `--real --confirm-real`、已确认范围且域名在范围内。运行把任务
+置为 `collecting_passive`，单动作经统一执行器执行（`adapter_call` 审计 +
+`ct_log` 预算），结果以 `completed`/`failed`/`blocked` 收口。crt.sh 对大域名可能
+返回大量证书行：整个响应规范化为一条 observation（证书按行保存 CN/SAN/issuer/
+serial/validity/first_seen/last_seen），原始响应体不落盘。默认端点
+`https://crt.sh/`，可用 `SURFACE_INTEL_CT_ENDPOINT` 覆盖；请求超时默认 30 秒
+（crt.sh 慢查询常见），`rate_limited`/`http_error` 属基础设施失败，重跑是合法
+重新观察。

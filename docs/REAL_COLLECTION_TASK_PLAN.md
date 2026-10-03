@@ -191,6 +191,17 @@ stats/host/account 操作的 evidence-only 记录。执行了
 与 `dns-lookup --real --confirm-real`。全套测试 `78 passed`；本增量只使用
 fixture client，未对任何真实目标发起 DNS 查询。
 
+**R3.2 第一增量实际验证**：新增 `CertificateTransparencyAdapter`（`ct_log` 1.0，
+注入式 CT log client，证书行规范化保存 CN/SAN/issuer/serial/validity/
+first_seen/last_seen/log id）、真实 `CrtShClient`（crt.sh JSON API、可注入
+fetch、percent-encoded 查询、429→rate_limited、超时/坏响应结构化映射、
+`SURFACE_INTEL_CT_ENDPOINT` 端点覆盖）和 `run_ct_search`（runner 级 scope 门控
+在 client 调用之前 + 统一执行器单动作执行 + `adapter_call` 审计 + `ct_log`
+预算）。SAN 只产生候选关系：全在范围内仍为 `candidate`，任何第三方或范围外
+名称升级为 `needs_review`，CT 观察绝不创建资产或 `confirmed` 关系。CLI 增加
+`ct-health --real` 与 `ct-search --real --confirm-real`。全套测试 `110 passed`；
+本增量只使用 fixture fetch，未对 crt.sh 或任何真实目标发起网络请求。
+
 真实搜索 smoke test 已在用户明确授权的
 `www.ceramtec-group.cn` 上执行。任务
 `task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
@@ -264,9 +275,9 @@ fixture client，未对任何真实目标发起 DNS 查询。
 
 - [x] `DnsAdapter`：A/AAAA/CNAME/NS/MX/TXT/SOA，记录 TTL、解析时间、解析器、
       DNSSEC/错误和超时；不得递归扩大到未授权域名。（2026-10-03 R3.1 第一增量）
-- [ ] `CertificateTransparencyAdapter`：证书 CN/SAN、issuer、serial、validity、
+- [x] `CertificateTransparencyAdapter`：证书 CN/SAN、issuer、serial、validity、
       log source、首次/最后观察；域名关系先标记 candidate，不能仅凭证书确认
-      资产归属。
+      资产归属。（2026-10-03 R3.2 第一增量）
 - [ ] `RdapAdapter`：注册组织、网络、ASN、CIDR、abuse 联系信息和查询时间；
       WHOIS fallback 必须明确数据质量和许可状态。
 - [ ] 所有适配器输出统一 observation、evidence metadata 和 source quality，

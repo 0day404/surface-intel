@@ -14,6 +14,9 @@ from .adapters.base import TaskContext
 from .adapters.dns import DNS_RECORD_TYPES, DnsAdapter
 from .dns_client import configured_dns_client
 from .dns_runner import run_dns_lookup
+from .adapters.ct import CertificateTransparencyAdapter
+from .ct_client import configured_ct_client
+from .ct_runner import run_ct_search
 from .fofa_client import configured_fofa_client
 from .fofa_runner import run_fofa_query
 from .logging import configure_logging
@@ -314,6 +317,77 @@ def cmd_dns_lookup(args: argparse.Namespace) -> int:
     return 0 if result.status == "completed" else 2
 
 
+def cmd_ct_health(args: argparse.Namespace) -> int:
+    if not args.real:
+        print(json.dumps({"ok": False, "error": "real_flag_required"}))
+        return 2
+    try:
+        client = configured_ct_client()
+    except Exception as exc:
+        print(json.dumps({"ok": False, "status": "not_configured", "error": type(exc).__name__}))
+        return 2
+
+    async def call():
+        return await CertificateTransparencyAdapter(client).health(TaskContext("ct-health", "health"))
+
+    result = asyncio.run(call())
+    detail = result.observations[0] if result.observations else {}
+    print(json.dumps({"ok": result.status == "completed", "status": result.status, "detail": detail}, ensure_ascii=True))
+    return 0 if result.status == "completed" else 2
+
+
+def cmd_ct_search(args: argparse.Namespace) -> int:
+    if not args.real or not args.confirm_real:
+        print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
+        return 2
+    db = Database(_config(args).database_path)
+    db.initialize()
+    task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    scope_row = next(db.rows(
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+    ), None)
+    if task is None or scope_row is None or not scope_row["confirmed"]:
+        print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    if not scope.is_in_scope(args.domain):
+        print(json.dumps({"ok": False, "error": "target_out_of_scope"}))
+        return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.COLLECTING_PASSIVE.value, args.task_id),
+        )
+    client = configured_ct_client()
+
+    async def call():
+        return await run_ct_search(db, client, task_id=args.task_id, scope=scope, domain=args.domain)
+
+    try:
+        result = asyncio.run(call())
+    except Exception as exc:
+        print(json.dumps({"ok": False, "status": "failed", "error": type(exc).__name__}))
+        return 2
+    final_status = {
+        "completed": TaskStatus.COMPLETED.value,
+        "partial": TaskStatus.PARTIAL.value,
+        "blocked": TaskStatus.BLOCKED.value,
+    }.get(result.status, TaskStatus.FAILED.value)
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (final_status, args.task_id),
+        )
+    print(json.dumps({
+        "ok": result.status == "completed",
+        "status": result.status,
+        "observations": result.observations,
+        "certificates": result.certificates,
+        "error": result.error,
+    }, ensure_ascii=True))
+    return 0 if result.status == "completed" else 2
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
@@ -364,12 +438,12 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
             command.add_argument("task_root")
-        elif name not in {"fofa-health", "dns-health"}:
+        elif name not in {"fofa-health", "dns-health", "ct-health"}:
             command.add_argument("--task-root", required=True)
         if name == "create":
             command.add_argument("--input", required=False)
@@ -379,6 +453,8 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "fofa-health":
             command.add_argument("--real", action="store_true")
         if name == "dns-health":
+            command.add_argument("--real", action="store_true")
+        if name == "ct-health":
             command.add_argument("--real", action="store_true")
         if name == "fofa-search":
             command.add_argument("task_id")
@@ -390,6 +466,11 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("task_id")
             command.add_argument("--domain", required=True)
             command.add_argument("--types", default=",".join(DNS_RECORD_TYPES))
+            command.add_argument("--real", action="store_true")
+            command.add_argument("--confirm-real", action="store_true")
+        if name == "ct-search":
+            command.add_argument("task_id")
+            command.add_argument("--domain", required=True)
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
         if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel"}:
