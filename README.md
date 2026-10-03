@@ -7,6 +7,10 @@
 - 范围标准化、排除项优先、动作幂等、Mock 被动/FOFA 多页适配器；
 - SQLite 观察/证据/资产/缺口索引，以及可重建 JSON/XLSX。
 - P4 安全主动门控、能力矩阵、Safe HTTP/Port 适配器和 P5 checkpoint/崩溃恢复。
+- P6 子任务租约/心跳/重复结果保护，以及外部 Playwright MCP 公开页面观察边界。
+
+P6 的 Playwright 连接通过注入的 MCP 调用边界测试；项目不复制 Playwright 源码、
+`node_modules`、浏览器缓存或凭据。
 
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`

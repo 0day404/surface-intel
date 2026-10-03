@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -112,6 +112,43 @@ class Database:
                     health_status TEXT NOT NULL DEFAULT 'unknown',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS subtask (
+                    subtask_id TEXT PRIMARY KEY,
+                    parent_task_id TEXT NOT NULL REFERENCES task(task_id),
+                    role TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    scope_version TEXT NOT NULL,
+                    input_snapshot_ref TEXT,
+                    allowed_tools_json TEXT NOT NULL,
+                    forbidden_actions_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempt INTEGER NOT NULL DEFAULT 0,
+                    result_ref TEXT,
+                    checkpoint_ref TEXT,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    last_heartbeat_at TEXT,
+                    error_code TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    completed_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS agent_lease (
+                    lease_id TEXT PRIMARY KEY,
+                    subtask_id TEXT NOT NULL REFERENCES subtask(subtask_id),
+                    worker_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    last_heartbeat_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    UNIQUE(subtask_id, status)
+                );
+                CREATE TABLE IF NOT EXISTS subtask_result (
+                    result_id TEXT PRIMARY KEY,
+                    subtask_id TEXT NOT NULL REFERENCES subtask(subtask_id),
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
                 """
             )
@@ -125,6 +162,7 @@ class Database:
                 if name not in columns:
                     db.execute(f"ALTER TABLE action ADD COLUMN {name} {definition}")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (2)")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (3)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:
