@@ -50,10 +50,11 @@ uv run surface-intel ct-health --real
 uv run surface-intel ct-search --task-root .\task <task-id> --domain example.com --real --confirm-real
 ```
 
-`ct-search` 查询证书透明度日志（默认 crt.sh，`SURFACE_INTEL_CT_ENDPOINT` 可覆盖），
-保存 CN、SAN、issuer、serial、validity、log source 和 first_seen/last_seen。
-证书 SAN 只产生 `candidate` 关系，任何第三方或范围外域名都会把观察升级为
-`needs_review`；CT 匹配单独绝不确认资产归属。
+`ct-search` 查询证书透明度日志，保存 CN、SAN、issuer、serial、validity、
+log source 和 first_seen/last_seen。证书 SAN 只产生 `candidate` 关系，任何
+第三方或范围外域名都会把观察升级为 `needs_review`；CT 匹配单独绝不确认资产
+归属。默认源 crt.sh；其长时间不可用时可设 `SURFACE_INTEL_CT_SOURCE=ctlogs`
+切换 ctlogs.dev 备用源（`SURFACE_INTEL_CT_API_KEY` 可选提高限额）。
 
 R3.3 起真实被动注册数据入口同样显式受控：
 

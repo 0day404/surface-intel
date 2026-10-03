@@ -145,6 +145,22 @@ async def test_missing_target_blocked_in_validate():
 
 
 @pytest.mark.asyncio
+async def test_alternate_source_completeness_markers_pass_through():
+    """ctlogs.dev rows carry san_count/san_completeness; crt.sh rows leave them None."""
+    ctlogs_row = _cert(log_source="ctlogs.dev", san_count=2, san_completeness="match_only")
+    client = FixtureCtClient({"example.com": _observed([ctlogs_row, _cert()])})
+    result = await CertificateTransparencyAdapter(client).execute(
+        {"target": "example.com"}, TaskContext("task-1", "scope-v1")
+    )
+    rows = result.observations[0]["certificates"]
+    assert rows[0]["san_count"] == 2
+    assert rows[0]["san_completeness"] == "match_only"
+    assert rows[0]["log_source"] == "ctlogs.dev"
+    assert rows[1]["san_count"] is None  # crt.sh rows have no completeness markers
+    assert rows[1]["san_completeness"] is None
+
+
+@pytest.mark.asyncio
 async def test_health_without_client_reports_not_configured():
     result = await CertificateTransparencyAdapter(FixtureCtClient({})).health(
         TaskContext("task-1", "scope-v1")

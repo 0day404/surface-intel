@@ -31,7 +31,11 @@ R3.2 增加被动 CT 入口：`ct-health --real` 只报告端点配置，不发�
 serial/validity/first_seen/last_seen），原始响应体不落盘。默认端点
 `https://crt.sh/`，可用 `SURFACE_INTEL_CT_ENDPOINT` 覆盖；请求超时默认 30 秒
 （crt.sh 慢查询常见），`rate_limited`/`http_error` 属基础设施失败，重跑是合法
-重新观察。
+重新观察。crt.sh 长期不可用（30 天 uptime 约 44%）时可设
+`SURFACE_INTEL_CT_SOURCE=ctlogs` 切换 ctlogs.dev：匿名 100 请求/小时，
+`SURFACE_INTEL_CT_API_KEY`（免费 key）提高限额，`SURFACE_INTEL_CT_DETAIL_LIMIT`
+（默认 5）控制每搜索的 SAN 回填请求数——SAN 回填消耗额外请求，match-only 行的
+`san_completeness` 字段标明数据完整度。
 
 R3.3 增加被动注册数据入口：`rdap-health --real` 只报告端点配置，不发起网络请求；
 `rdap-lookup` 要求 `--real --confirm-real`、已确认范围且目标在范围内（IP 需在

@@ -41,6 +41,18 @@ API，`SURFACE_INTEL_CT_ENDPOINT` 可覆盖端点）；URL 参数经 percent-enc
 原始响应体不落盘不进日志，只持久化规范化证书行。health 只报告端点配置，不发起
 网络请求。
 
+R3.2 补充：新增 ctlogs.dev 备用 CT 源（`CrtlogsDevClient`，
+`SURFACE_INTEL_CT_SOURCE=ctlogs` 切换，crt.sh 仍为默认）。ctlogs.dev 搜索行只含
+匹配名（无 SAN 列表，仅 `san_count`），因此 `sans` 初始只有匹配名且
+`san_completeness=match_only`；默认对前 5 条（`SURFACE_INTEL_CT_DETAIL_LIMIT`
+可调）best-effort 调用证书 detail 端点回填完整 `san_dns`、subject CN、完整
+issuer DN 和 SCT 时间戳（first_seen/last_seen），回填失败静默保留 match-only
+行。每次搜索消耗 1 + min(detail_limit, 行数) 个请求；匿名限额 100 请求/小时，
+`SURFACE_INTEL_CT_API_KEY` 提供 Bearer key。两个真实 client 都要求可识别
+User-Agent（通用 python-urllib UA 被 ctlogs.dev 403）。跨源共性：ctlogs.dev 的
+contains 类匹配噪声（如 `notexample.org` 匹配 `example.com` 查询）与 crt.sh
+一样会经匹配名分类升级为 `needs_review`，不产生 `confirmed`。
+
 R3.3 增加 `RdapAdapter`（`rdap_lookup` 1.0，`passive_only`，注入式 lookup
 client）。目标种类白名单 domain/ip/asn（`TARGET_KINDS`）；观察保存注册组织、
 registrar、abuse 联系（仅 RDAP `abuse` 角色 vCard email）、事件时间

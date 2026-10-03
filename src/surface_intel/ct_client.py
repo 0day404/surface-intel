@@ -17,8 +17,14 @@ DEFAULT_CT_ENDPOINT = "https://crt.sh/"
 FetchFunc = Callable[[str, float], tuple[int, str]]
 
 
-def _default_fetch(url: str, timeout: float) -> tuple[int, str]:
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+USER_AGENT = "surface-intel/0.1.0 (passive CT lookup)"
+
+
+def _default_fetch(url: str, timeout: float, headers: dict[str, str] | None = None) -> tuple[int, str]:
+    # An identifiable User-Agent is required: generic python-urllib UA gets 403
+    # from ctlogs.dev (and is impolite to crt.sh).
+    base = {"Accept": "application/json", "User-Agent": USER_AGENT}
+    request = urllib.request.Request(url, headers={**base, **(headers or {})})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.status, response.read().decode("utf-8", "replace")
 
@@ -119,10 +125,181 @@ def normalize_ct_row(row: Any) -> dict[str, Any] | None:
     }
 
 
-def configured_ct_client(timeout: float = 30.0) -> CrtShClient:
-    """Build the real CT client; endpoint defaults to env override then crt.sh."""
-    endpoint = os.environ.get("SURFACE_INTEL_CT_ENDPOINT", "").strip() or DEFAULT_CT_ENDPOINT
-    return CrtShClient(endpoint=endpoint, timeout=timeout)
+DEFAULT_CTLOGS_SEARCH = "https://ctlogs.dev/search"
+DEFAULT_CTLOGS_DETAIL = "https://api.ctlogs.dev/v1/cert"
+
+
+def normalize_ctlogs_row(row: Any) -> dict[str, Any] | None:
+    """Map one ctlogs.dev search row to the stored certificate shape.
+
+    Search rows reveal the matched identity only — no SAN list (`san_count`
+    just states how many names the certificate carries). `sans` keeps the
+    match and `san_completeness` stays `match_only` unless the detail backfill
+    succeeds, so downstream consumers can tell partial SAN data from full.
+    """
+    if not isinstance(row, dict):
+        return None
+    match = str(row.get("match", "") or "").strip().rstrip(".").lower()
+    return {
+        "common_name": None,
+        "sans": [match] if match else [],
+        "issuer": row.get("issuer"),
+        "serial": row.get("serial_hex"),
+        "not_before": row.get("not_before"),
+        "not_after": row.get("not_after"),
+        "first_seen": None,
+        "last_seen": None,
+        "log_id": row.get("id"),
+        "log_source": "ctlogs.dev",
+        "san_count": row.get("san_count"),
+        "san_completeness": "match_only",
+    }
+
+
+def apply_ctlogs_detail(row: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    """Enrich a match-only row in place from a ctlogs.dev cert detail payload."""
+    sans = detail.get("san_dns")
+    if isinstance(sans, list) and sans:
+        row["sans"] = [str(item).strip().rstrip(".").lower() for item in sans if str(item).strip()]
+        row["san_completeness"] = "full"
+    common_name = detail.get("subject_cn")
+    if common_name:
+        row["common_name"] = str(common_name).strip().rstrip(".").lower()
+    issuer_dn = detail.get("issuer_dn")
+    if issuer_dn:
+        row["issuer"] = issuer_dn  # full DN supersedes the search row's issuer CN
+    sightings = detail.get("sightings")
+    if isinstance(sightings, list) and sightings:
+        stamps = sorted(
+            str(item.get("sct_ts"))
+            for item in sightings
+            if isinstance(item, dict) and item.get("sct_ts")
+        )
+        if stamps:
+            row["first_seen"] = stamps[0]
+            row["last_seen"] = stamps[-1]
+    return row
+
+
+class CrtlogsDevClient(CtLogClient):
+    """Alternative CT client over ctlogs.dev (crt.sh outage fallback).
+
+    Each search consumes 1 + min(detail_limit, rows) HTTP requests; anonymous
+    access is capped at 100 requests/hour, so the detail backfill defaults to
+    a small number. Detail fetches are best-effort: any failure leaves the
+    match-only search row in place and never fails the search itself.
+    """
+
+    def __init__(
+        self,
+        search_endpoint: str = DEFAULT_CTLOGS_SEARCH,
+        detail_endpoint: str = DEFAULT_CTLOGS_DETAIL,
+        timeout: float = 30.0,
+        fetch: FetchFunc | None = None,
+        api_key: str | None = None,
+        detail_limit: int = 5,
+    ):
+        self._search_endpoint = search_endpoint.rstrip("/")
+        self._detail_endpoint = detail_endpoint.rstrip("/")
+        self._timeout = timeout
+        self._api_key = api_key
+        self._detail_limit = max(0, int(detail_limit))
+        if fetch is not None:
+            self._fetch = fetch
+        elif api_key:
+            headers = self._headers()
+            self._fetch = lambda url, timeout_: _default_fetch(url, timeout_, headers)
+        else:
+            self._fetch = _default_fetch
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
+
+    async def health(self) -> dict[str, Any]:
+        return {
+            "ok": bool(self._search_endpoint.startswith("http")),
+            "endpoint": self._search_endpoint,
+            "detail_endpoint": self._detail_endpoint,
+            "detail_limit": self._detail_limit,
+            "api_key_configured": bool(self._api_key),
+            "adapter": "ct_log",
+            "source": "ctlogs.dev",
+        }
+
+    async def search(self, domain: str) -> dict[str, Any]:
+        normalized = domain.strip().rstrip(".").lower()
+        query = urllib.parse.urlencode({"q": normalized, "output": "json"})
+        url = f"{self._search_endpoint}?{query}"
+        started = time.perf_counter()
+        try:
+            status_code, body = await asyncio.to_thread(self._fetch, url, self._timeout)
+        except TimeoutError:
+            return {"status": "timeout", "certificates": [], "queried_at": _now()}
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                return {"status": "rate_limited", "certificates": [], "queried_at": _now()}
+            return {"status": "http_error", "certificates": [], "queried_at": _now(), "http_code": exc.code}
+        except Exception as exc:  # transport death; classification stays coarse on purpose
+            return {"status": "invalid_response", "certificates": [], "queried_at": _now(), "error_type": type(exc).__name__}
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return {"status": "invalid_response", "certificates": [], "queried_at": _now()}
+        rows = payload.get("rows") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            return {"status": "invalid_response", "certificates": [], "queried_at": _now()}
+        certificates = [row for row in (normalize_ctlogs_row(item) for item in rows) if row is not None]
+        await self._backfill_details(certificates)
+        status = "observed" if certificates else "empty"
+        return {
+            "status": status,
+            "certificates": certificates,
+            "log_source": "ctlogs.dev",
+            "queried_at": _now(),
+            "query_ms": elapsed_ms,
+        }
+
+    async def _backfill_details(self, certificates: list[dict[str, Any]]) -> None:
+        for row in certificates[: self._detail_limit]:
+            cert_id = row.get("log_id")
+            if not cert_id:
+                continue
+            url = f"{self._detail_endpoint}/{urllib.parse.quote(str(cert_id), safe='')}"
+            try:
+                _status_code, body = await asyncio.to_thread(self._fetch, url, self._timeout)
+                detail = json.loads(body)
+            except Exception:  # backfill is best-effort; the search row stays usable
+                continue
+            if isinstance(detail, dict):
+                apply_ctlogs_detail(row, detail)
+
+
+def configured_ct_client(timeout: float = 30.0) -> CtLogClient:
+    """Build the real CT client; `SURFACE_INTEL_CT_SOURCE` picks the backend.
+
+    `crtsh` (default): crt.sh JSON API, `SURFACE_INTEL_CT_ENDPOINT` overrides
+    the endpoint. `ctlogs`: ctlogs.dev, `SURFACE_INTEL_CT_API_KEY` sets a
+    Bearer key and `SURFACE_INTEL_CT_DETAIL_LIMIT` caps per-search detail
+    backfills (default 5). Unknown sources fail loudly rather than silently
+    falling back to the wrong data source.
+    """
+    source = os.environ.get("SURFACE_INTEL_CT_SOURCE", "").strip().lower()
+    if source in {"", "crtsh"}:
+        endpoint = os.environ.get("SURFACE_INTEL_CT_ENDPOINT", "").strip() or DEFAULT_CT_ENDPOINT
+        return CrtShClient(endpoint=endpoint, timeout=timeout)
+    if source == "ctlogs":
+        api_key = os.environ.get("SURFACE_INTEL_CT_API_KEY", "").strip() or None
+        raw_limit = os.environ.get("SURFACE_INTEL_CT_DETAIL_LIMIT", "").strip()
+        try:
+            detail_limit = int(raw_limit) if raw_limit else 5
+        except ValueError:
+            raise ValueError("invalid_ct_detail_limit") from None
+        return CrtlogsDevClient(timeout=timeout, api_key=api_key, detail_limit=detail_limit)
+    raise ValueError(f"unknown_ct_source:{source}")
 
 
 def _now() -> str:

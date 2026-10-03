@@ -128,6 +128,10 @@ class CertificateTransparencyAdapter:
             "last_seen": row.get("last_seen"),
             "log_id": row.get("log_id"),
             "log_source": row.get("log_source") or "crt.sh",
+            # CT-source completeness markers (set by sources whose search rows
+            # do not carry the full SAN list); None for crt.sh rows.
+            "san_count": row.get("san_count"),
+            "san_completeness": row.get("san_completeness"),
         }
 
     @staticmethod

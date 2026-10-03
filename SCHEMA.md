@@ -36,7 +36,9 @@ R3.2 同样无 migration 变化：CT 观察复用 `evidence`/`observation`（sou
 `log_id`、`log_source`）、`matched_count`、`log_source`、`queried_at`、
 `query_ms`、`source_quality`、`license_status`、`scope_version`、`observed_at` 和
 `related_scope_status`（`candidate`/`needs_review`/`not_applicable`——CT 匹配
-单独绝不产生 `confirmed`）。
+单独绝不产生 `confirmed`）。R3.2 补充后证书行另含 `san_count` 与
+`san_completeness`（`match_only`/`full`，crt.sh 行为 `None`）：ctlogs.dev 源的
+搜索行只揭示匹配名，未回填 detail 前 SAN 列表不完整，R4 归并层可据此甄别。
 
 R3.3 同样无 migration 变化：RDAP 观察复用 `evidence`/`observation`（source 为
 `rdap_lookup`），执行审计复用 `adapter_call`，预算复用 `budget` 表的

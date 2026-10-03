@@ -202,6 +202,18 @@ fetch、percent-encoded 查询、429→rate_limited、超时/坏响应结构化�
 `ct-health --real` 与 `ct-search --real --confirm-real`。全套测试 `110 passed`；
 本增量只使用 fixture fetch，未对 crt.sh 或任何真实目标发起网络请求。
 
+**R3.2 补充验证（ctlogs.dev 备用源）**：crt.sh 长期不可用（30 天 uptime 约
+44%，频繁 502）后新增 `CrtlogsDevClient`（`SURFACE_INTEL_CT_SOURCE=ctlogs`
+切换）：搜索行只含匹配名与 `san_count`，默认前 5 条
+（`SURFACE_INTEL_CT_DETAIL_LIMIT`）best-effort 回填完整 `san_dns`/subject CN/
+完整 issuer DN/SCT 时间戳，失败静默降级为 `san_completeness=match_only`；
+`SURFACE_INTEL_CT_API_KEY` 提供 Bearer key（匿名限额 100 请求/小时）。证书行
+新增 `san_count`/`san_completeness` 字段（crt.sh 行为 None）。实现中发现并
+修复：通用 python-urllib User-Agent 被 ctlogs.dev 403，统一改为可识别 UA。
+全套测试 `171 passed`；本增量使用注入 fetch 完成 fixture 测试后，仅以
+`example.com` 做了一次真实连通性验证（17 行、首条完整回填），未接触任何
+用户授权目标。
+
 **R3.3 第一增量实际验证**：新增 `RdapAdapter`（`rdap_lookup` 1.0，目标种类
 白名单 domain/ip/asn，注入式 lookup client，规范化保存注册组织/registrar/
 abuse 联系/事件时间/CIDR/ASN 区间/country/nameservers）、真实
