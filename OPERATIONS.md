@@ -56,9 +56,13 @@ R4.3 放开 ASN 直查：`rdap-lookup --kind asn` 在两种依据下放行——
 归属，组织名/ASN 相同绝不确认资产。
 
 R4.1 增加离线归并入口：`surface-intel merge <task-id> --task-root .\task` 读取
-任务全部 observation（当前覆盖 dns_resolver/ct_log/rdap_lookup，其他来源计入
-skipped），幂等地生成/更新统一资产、关系和冲突行，并执行架构识别
-（architecture_status + 逐信号证据）。归并不发起任何网络请求、不修改任务
+任务全部 observation（R4.4 起覆盖 dns_resolver/ct_log/rdap_lookup/fofa_mcp，
+未知来源计入 skipped），幂等地生成/更新统一资产、关系和冲突行，并执行架构
+识别（architecture_status + 逐信号证据）。归并不发起任何网络请求、不修改任务
 状态，可重复执行：first_seen 保留、last_seen 推进、历史值并存、属性冲突写
 `asset_conflict`（unresolved）而非择值；架构识别只产出 candidate/likely/
-third_party，confirmed_* 留给 R6 主动验证。
+third_party，confirmed_* 留给 R6 主动验证。R4.6 起关系带生命周期
+（current/disappeared，last_transition 记 new/disappeared/reappeared——对应
+新增/删除/重现与临时变化），置信度按证据年龄确定性衰减（scope 锚点除外）。
+`report` 命令的 JSON 含 `asset_relations`/`asset_conflicts`/`merge_summary`，
+XLSX 含 `资产关系`/`归并冲突` 工作表。

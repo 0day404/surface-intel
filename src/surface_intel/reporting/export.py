@@ -36,6 +36,12 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
     if task is None:
         raise ValueError("task_not_found")
     assets = [dict(row) for row in db.rows("SELECT * FROM asset WHERE task_id=?", (task_id,))]
+    asset_relations = [dict(row) for row in db.rows(
+        "SELECT * FROM asset_relation WHERE task_id=? ORDER BY rowid", (task_id,),
+    )]
+    asset_conflicts = [dict(row) for row in db.rows(
+        "SELECT * FROM asset_conflict WHERE task_id=? ORDER BY rowid", (task_id,),
+    )]
     observations = [dict(row) for row in db.rows("SELECT * FROM observation WHERE task_id=?", (task_id,))]
     gaps = [dict(row) for row in db.rows("SELECT * FROM gap WHERE task_id=?", (task_id,))]
     evidence = [dict(row) for row in db.rows("SELECT * FROM evidence WHERE task_id=?", (task_id,))]
@@ -67,6 +73,19 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         "task": dict(task),
         "integrity_status": integrity_status,
         "assets": assets,
+        "asset_relations": asset_relations,
+        "asset_conflicts": asset_conflicts,
+        "merge_summary": {
+            "asset_count": len(assets),
+            "confirmed_assets": sum(row["scope_status"] == "confirmed" for row in assets),
+            "candidate_assets": sum(row["scope_status"] == "candidate" for row in assets),
+            "third_party_assets": sum(row["architecture_status"] == "third_party" for row in assets),
+            "relation_count": len(asset_relations),
+            "confirmed_relations": sum(row["status"] == "confirmed" for row in asset_relations),
+            "unresolved_conflicts": sum(row["status"] == "unresolved" for row in asset_conflicts),
+            "sources": sorted({item["source"] for row in assets
+                               for item in json.loads(row.get("sources_json") or "[]")}),
+        },
         "observations": observations,
         "gaps": gaps,
         "evidence": evidence,
@@ -105,6 +124,19 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         sheet.append(list(assets[0].keys()))
         for row in assets:
             sheet.append([_excel_safe(row[key]) for key in assets[0]])
+    relations_sheet = workbook.create_sheet("资产关系")
+    if asset_relations:
+        relations_sheet.append(list(asset_relations[0].keys()))
+        for row in asset_relations:
+            relations_sheet.append([_excel_safe(row[key]) for key in asset_relations[0]])
+    conflicts_sheet = workbook.create_sheet("归并冲突")
+    conflicts_sheet.append(["conflict_id", "asset_id", "attribute", "values_json", "status", "created_at"])
+    for row in asset_conflicts:
+        conflicts_sheet.append([
+            _excel_safe(row["conflict_id"]), _excel_safe(row["asset_id"]),
+            _excel_safe(row["attribute"]), _excel_safe(row["values_json"]),
+            _excel_safe(row["status"]), _excel_safe(row["created_at"]),
+        ])
     workbook.create_sheet("信息缺口")
     for row in gaps:
         workbook["信息缺口"].append([_excel_safe(value) for value in row.values()])

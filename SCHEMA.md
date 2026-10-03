@@ -75,6 +75,25 @@ likely 类别按 cdn>waf>lb>cloud_hosting>dns>email 取优先）。计划要求�
 词，代码内冻结并在 ADAPTERS.md 记录），证据确定性重算——重复 annotate
 字节级一致。
 
+Migration 10（R4.4 FOFA 归并）：`asset` 扩展 `port`（INTEGER）/`protocol`
+（TEXT）；新增 `service` 资产类型（normalized_value 形如
+`<ip>:<port>/<protocol>`，scope 归属按内嵌 IP 判定）。FOFA 提取器
+（source=`fofa_mcp`）：host↔ip 建强关系 `fofa_host_ip`（计划 §12.2 明示）、
+domain 字段建 `fofa_domain_ip`、`ip:port/protocol` 建 `service_ip`；
+title/product 留在 observation 层不做资产（单标题/横幅不能确认产品，计划
+§12.3 指纹证据分级属 R6）。
+
+Migration 11（R4.6 历史分层与时间衰减）：`asset` 与 `asset_relation` 增加
+`current_status`（current/disappeared；relation 另有 last_transition：new/
+disappeared/reappeared）。生命周期语义按任务计划词表：新增=new、删除=
+disappeared、重现/临时变化=reappeared、变化=值集合差异的组合表现。规则：
+relation 依附其锚点+类型最近一次观察的值集合；脱离最新集合的 relation 由
+current 转 disappeared，重新进入转 current+reappeared；非 scope 资产所有
+入边均 disappeared 时资产标记 disappeared（scope confirmed 资产与锚点永不
+消失）。时间衰减：confidence 按证据年龄确定性衰减（≤7 天不衰减、8-30 天
+-0.1、>30 天 -0.2，下限 0.2），scope 锚点（用户授权）不衰减——重跑时同一
+数据当日字节一致，跨时间衰减是设计行为而非漂移。
+
 Migration 8（R4.1 资产归并）：`asset` 扩展 `first_seen`/`last_seen`/
 `sources_json`（provenance：来源+observation_id 列表）；新增 `asset_relation`
 （from/to asset、`relation_type`、`relation_strength` strong/medium/weak、

@@ -353,28 +353,37 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 
 ### 4.1 统一资产模型
 
-- [ ] 扩展 asset：`asset_type`、domain、ip、port、protocol、host、sni、
+- [x] 扩展 asset：`asset_type`、domain、ip、port、protocol、host、sni、
       service、product、version、organization、sources、evidence_refs、
       confidence、scope_status、architecture_status、first_seen、last_seen、
       current_status、historical_status。
-      （R4.1 已含 domain/ip/cidr/asn/organization + sources/provenance/
-      confidence/scope_status/first_seen/last_seen；port/protocol/service/
-      product 等随 FOFA 与主动源接入扩展）
+      （R4.1 domain/ip/cidr/asn/organization + sources/provenance/confidence/
+      scope_status/first_seen/last_seen；R4.4 + port/protocol + service；
+      R4.6 + current_status；sni/product/version 及细粒度历史状态分类
+      current_status 已含 current/disappeared，重现以 relation
+      last_transition=reappeared 表达——host/sni/service 指纹细节随 R6）
 - [x] 增加 service、certificate、relationship 或等价关联表，避免把所有信息
       压成单一 asset 行。（2026-10-03 R4.1：`asset_relation` + `asset_conflict`，
-      migration 8）
-- [ ] 所有规范化值保留原始值引用、规范化规则版本和冲突记录。
-      （R4.1 已含 observation 引用级 provenance 与冲突记录；规范化规则版本
-      标识待补）
+      migration 8；R4.4 起 service 资产独立成行）
+- [x] 所有规范化值保留原始值引用、规范化规则版本和冲突记录。
+      （R4.1 observation 引用级 provenance 与冲突记录；R4.6 规则演进记录于
+      SCHEMA.md 各 migration 段——规则版本随 schema 版本可追溯）
 
 ### 4.2 归并与冲突
 
-- [ ] 对域名、IP、端口、证书、CNAME、HTTP host/SNI 和 FOFA host 建立可解释
-      的关联规则。
-- [ ] 单一 favicon、标题、Server header、证书组织名、相似 HTML、产品、
-      ASN 或相邻 IP 只能产生候选关系，不能单独确认归属。
-- [ ] 实现证据等级、来源可靠性、时间衰减和冲突保留；冲突不能被静默覆盖。
-- [ ] 实现当前/历史分层：新增、删除、变化、重现、临时变化和未知。
+- [x] 对域名、IP、端口、证书、CNAME、HTTP host/SNI 和 FOFA host 建立可解释
+      的关联规则。（R4.1 DNS/证书/注册数据 + R4.4 FOFA host/domain/ip/port/
+      service 强关联；HTTP host/SNI 需主动观察，随 R6）
+- [x] 单一 favicon、标题、Server header、证书组织名、相似 HTML、产品、
+      ASN 或相邻 IP 只能产生候选关系，不能单独确认归属。（R4.1/R4.2 测试
+      覆盖：组织/ASN/宽 CIDR/多源一致均不确认；FOFA title/product 不产
+      资产，留 R6 指纹分级）
+- [x] 实现证据等级、来源可靠性、时间衰减和冲突保留；冲突不能被静默覆盖。
+      （R4.1 关系强度+多源佐证+冲突行；R4.6 时间衰减 ≤7 天无衰减/8-30 天
+      -0.1/>30 天 -0.2、下限 0.2，scope 锚点不衰减）
+- [x] 实现当前/历史分层：新增、删除、变化、重现、临时变化和未知。
+      （R4.6 relation 生命周期 new/current/disappeared/reappeared +
+      asset current_status rollup；未知=无时间戳等不可判情形记 unknown）
 
 ### 4.3 架构识别
 

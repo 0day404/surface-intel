@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 
 
 class Database:
@@ -100,6 +100,8 @@ class Database:
                     last_seen TEXT,
                     sources_json TEXT NOT NULL DEFAULT '[]',
                     architecture_json TEXT NOT NULL DEFAULT '[]',
+                    port INTEGER,
+                    protocol TEXT,
                     UNIQUE(task_id, asset_type, normalized_value)
                 );
                 CREATE TABLE IF NOT EXISTS asset_relation (
@@ -294,6 +296,21 @@ class Database:
             if "architecture_json" not in asset_columns:
                 db.execute("ALTER TABLE asset ADD COLUMN architecture_json TEXT NOT NULL DEFAULT '[]'")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (9)")
+            # migration 10: service assets from FOFA merge (R4.4)
+            if "port" not in asset_columns:
+                db.execute("ALTER TABLE asset ADD COLUMN port INTEGER")
+            if "protocol" not in asset_columns:
+                db.execute("ALTER TABLE asset ADD COLUMN protocol TEXT")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (10)")
+            # migration 11: current/historical lifecycle (R4.6)
+            if "current_status" not in asset_columns:
+                db.execute("ALTER TABLE asset ADD COLUMN current_status TEXT NOT NULL DEFAULT 'current'")
+            relation_columns = {row[1] for row in db.execute("PRAGMA table_info(asset_relation)").fetchall()}
+            if "current_status" not in relation_columns:
+                db.execute("ALTER TABLE asset_relation ADD COLUMN current_status TEXT NOT NULL DEFAULT 'current'")
+            if "last_transition" not in relation_columns:
+                db.execute("ALTER TABLE asset_relation ADD COLUMN last_transition TEXT")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (11)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

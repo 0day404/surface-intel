@@ -12,7 +12,7 @@ from .state.database import Database
 
 # Frozen asset taxonomy for the passive merge layer; service/url/app assets
 # arrive with FOFA/active sources later.
-ASSET_TYPES = ("domain", "ip", "cidr", "asn", "organization")
+ASSET_TYPES = ("domain", "ip", "cidr", "asn", "organization", "service")
 
 # Relation taxonomy per plan section 12.2. Weak relations are reserved for
 # name/brand similarity and are never produced by passive structure data -
@@ -20,6 +20,7 @@ ASSET_TYPES = ("domain", "ip", "cidr", "asn", "organization")
 RELATION_STRENGTH_BASE = {"strong": 0.7, "medium": 0.5, "weak": 0.25}
 STRONG_RELATION_TYPES = {
     "dns_a", "dns_aaaa", "dns_cname", "dns_ns", "dns_mx", "dns_soa", "cert_name",
+    "fofa_host_ip", "fofa_domain_ip", "service_ip",
 }
 MEDIUM_RELATION_TYPES = {"rdap_org", "rdap_registrar", "rdap_cidr", "rdap_asn"}
 RELATION_TYPES = tuple(sorted(STRONG_RELATION_TYPES | MEDIUM_RELATION_TYPES))
@@ -28,6 +29,16 @@ CORROBORATION_BONUS = 0.1
 CORROBORATION_CAP = 0.2
 CANDIDATE_CONFIDENCE_CAP = 0.95
 SCOPE_CONFIDENCE = 1.0
+
+# Evidence age decays confidence deterministically (plan: 来源可靠性、时间衰减).
+# Scope anchors never decay - user authorization is not evidence that ages.
+FRESH_DAYS = 7
+AGING_DAYS = 30
+FRESH_DECAY = 0.0
+AGING_DECAY = -0.1
+STALE_DECAY = -0.2
+CONFIDENCE_FLOOR = 0.2
+LIFECYCLE_STATUSES = ("current", "disappeared", "unknown")
 
 # Attributes tracked for source conflicts; conflicting values are preserved
 # as unresolved conflict rows, never silently picked.
@@ -72,6 +83,17 @@ def normalize_asset_value(asset_type: str, value: str) -> str | None:
         return digits if digits.isdigit() else None
     if asset_type == "organization":
         return cleaned or None
+    if asset_type == "service":
+        # value form: <ip>:<port>/<protocol>
+        address, _, rest = cleaned.partition(":")
+        port_text, _, protocol = rest.partition("/")
+        try:
+            ipaddress.ip_address(address)
+        except ValueError:
+            return None
+        if not port_text.isdigit():
+            return None
+        return f"{address}:{int(port_text)}/{protocol.strip().lower() or 'unknown'}"
     return None
 
 
@@ -114,6 +136,9 @@ def classify_asset_scope(scope: Scope, asset_type: str, normalized_value: str) -
         return "confirmed" if scope.is_in_scope(normalized_value) else "candidate"
     if asset_type == "ip":
         return "confirmed" if scope.is_in_scope(normalized_value) else "candidate"
+    if asset_type == "service":
+        address = normalized_value.split(":", 1)[0]
+        return "confirmed" if scope.is_in_scope(address) else "candidate"
     return "candidate"
 
 
@@ -125,14 +150,34 @@ def relation_strength(relation_type: str) -> str:
     return "weak"
 
 
+def freshness_decay(last_seen: str | None, as_of: str | None) -> float:
+    """Deterministic age decay: 0 within 7d, -0.1 within 30d, -0.2 beyond."""
+    if not last_seen or not as_of:
+        return FRESH_DECAY
+    try:
+        seen = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
+        now = datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+    except ValueError:
+        return FRESH_DECAY
+    days = (now - seen).total_seconds() / 86400
+    if days <= FRESH_DAYS:
+        return FRESH_DECAY
+    if days <= AGING_DAYS:
+        return AGING_DECAY
+    return STALE_DECAY
+
+
 def asset_confidence(
     *,
     scope_status: str,
     scope_anchored: bool,
     strengths: set[str],
     source_count: int,
+    last_seen: str | None = None,
+    as_of: str | None = None,
 ) -> float:
-    """Deterministic confidence: strongest relation + multi-source corroboration.
+    """Deterministic confidence: strongest relation + multi-source corroboration
+    minus evidence-age decay.
 
     Weak relations alone never yield a confirmable score and candidates are
     capped below 1.0 - only user-scoped anchors reach 1.0.
@@ -142,7 +187,8 @@ def asset_confidence(
     base = max((RELATION_STRENGTH_BASE[s] for s in strengths), default=RELATION_STRENGTH_BASE["weak"])
     bonus = min(CORROBORATION_CAP, max(0, source_count - 1) * CORROBORATION_BONUS)
     cap = CANDIDATE_CONFIDENCE_CAP if scope_status == "candidate" else 1.0
-    return round(min(cap, base + bonus), 2)
+    value = base + bonus + freshness_decay(last_seen, as_of)
+    return round(min(cap, max(CONFIDENCE_FLOOR, value)), 2)
 
 
 def _now_iso() -> str:
@@ -159,6 +205,8 @@ class _AssetDraft:
     seen: list[str] = field(default_factory=list)
     strengths: set[str] = field(default_factory=set)
     attributes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    port: int | None = None
+    protocol: str | None = None
 
     def key(self) -> tuple[str, str]:
         return (self.asset_type, self.normalized_value)
@@ -171,6 +219,7 @@ class _MergeWorkspace:
         self.scope = scope
         self.assets: dict[tuple[str, str], _AssetDraft] = {}
         self.relations: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.latest: dict[tuple[tuple[str, str], str], str] = {}
         self.skipped: list[dict[str, str]] = []
 
     def asset(
@@ -182,6 +231,8 @@ class _MergeWorkspace:
         observation_id: str,
         observed_at: str,
         scope_anchored: bool = False,
+        port: int | None = None,
+        protocol: str | None = None,
    ) -> tuple[str, str] | None:
         normalized = normalize_asset_value(asset_type, raw_value)
         if normalized is None or asset_type not in ASSET_TYPES:
@@ -200,6 +251,10 @@ class _MergeWorkspace:
                 scope_status=classify_asset_scope(self.scope, asset_type, normalized),
             )
             self.assets[key] = draft
+        if port is not None:
+            draft.port = port
+        if protocol:
+            draft.protocol = protocol
         if scope_anchored and self.scope.is_in_scope(normalized):
             # Anchoring marks the user-confirmed scope only for values the
             # scope document actually authorizes - a tainted or imported
@@ -224,6 +279,8 @@ class _MergeWorkspace:
     ) -> None:
         if from_key is None or to_key is None or from_key == to_key:
             return
+        # observations arrive in rowid order, so the last write is the latest
+        self.latest[(from_key, relation_type)] = observation_id
         key = (from_key, to_key, relation_type)
         entry = self.relations.get(key)
         provenance = {"source": source, "observation_id": observation_id, "observed_at": observed_at}
@@ -376,10 +433,46 @@ def _extract_rdap(workspace: _MergeWorkspace, payload: dict[str, Any], observati
         })
 
 
+def _extract_fofa(workspace: _MergeWorkspace, payload: dict[str, Any], observation: dict[str, Any]) -> None:
+    observed_at = observation.get("observed_at", "")
+    source = observation["source"]
+
+    def anchor(asset_type: str, raw_value: str, **kwargs: Any) -> tuple[str, str] | None:
+        return workspace.asset(asset_type, raw_value, source=source,
+                               observation_id=observation["observation_id"],
+                               observed_at=observed_at, **kwargs)
+
+    ip_key = anchor("ip", str(payload.get("ip", ""))) if payload.get("ip") else None
+    host = str(payload.get("host", "") or "").split("/", 1)[0].strip()
+    host_key = None
+    if host and ":" not in host and not _parses_as_ip(host):
+        host_key = anchor("domain", host)
+    if host_key and ip_key:
+        # plan 12.2: FOFA same-result IP and Host is an explicit strong relation
+        workspace.relation(host_key, ip_key, "fofa_host_ip", source=source,
+                           observation_id=observation["observation_id"], observed_at=observed_at)
+    domain_value = str(payload.get("domain", "") or "").strip()
+    if ip_key and domain_value and domain_value.lower() != host.lower():
+        domain_key = anchor("domain", domain_value)
+        if domain_key:
+            workspace.relation(ip_key, domain_key, "fofa_domain_ip", source=source,
+                               observation_id=observation["observation_id"], observed_at=observed_at)
+    if ip_key and payload.get("port") is not None:
+        protocol = str(payload.get("protocol", "") or "unknown")
+        service_value = f"{payload.get('ip')}:{payload.get('port')}/{protocol}"
+        service_key = anchor("service", service_value,
+                             port=int(payload.get("port")), protocol=protocol.lower() or "unknown")
+        workspace.relation(ip_key, service_key, "service_ip", source=source,
+                           observation_id=observation["observation_id"], observed_at=observed_at)
+    # title/product stay observation-only: single banners cannot confirm
+    # products (plan 12.3) - they become R6 fingerprint evidence
+
+
 _EXTRACTORS = {
     "dns_resolver": _extract_dns,
     "ct_log": _extract_ct,
     "rdap_lookup": _extract_rdap,
+    "fofa_mcp": _extract_fofa,
 }
 
 
@@ -424,14 +517,16 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
     with db.connect() as connection:
         for (asset_type, normalized_value), draft in sorted(workspace.assets.items()):
             sources_payload = json.dumps(draft.sources, ensure_ascii=True, sort_keys=True)
+            first_seen = min(draft.seen) if draft.seen else now
+            last_seen = max(draft.seen) if draft.seen else now
             confidence = asset_confidence(
                 scope_status=draft.scope_status,
                 scope_anchored=draft.scope_anchored,
                 strengths=draft.strengths,
                 source_count=len({item["source"] for item in draft.sources}),
+                last_seen=last_seen,
+                as_of=now,
             )
-            first_seen = min(draft.seen) if draft.seen else now
-            last_seen = max(draft.seen) if draft.seen else now
             existing = connection.execute(
                 "SELECT asset_id,first_seen FROM asset WHERE task_id=? AND asset_type=? AND normalized_value=?",
                 (task_id, asset_type, normalized_value),
@@ -440,10 +535,10 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                 asset_id = f"asset-{uuid.uuid4().hex[:16]}"
                 connection.execute(
                     """INSERT INTO asset(asset_id,task_id,asset_type,normalized_value,scope_status,
-                                         confidence,first_seen,last_seen,sources_json)
-                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                                         confidence,first_seen,last_seen,sources_json,port,protocol)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                     (asset_id, task_id, asset_type, normalized_value, draft.scope_status,
-                     confidence, first_seen, last_seen, sources_payload),
+                     confidence, first_seen, last_seen, sources_payload, draft.port, draft.protocol),
                 )
                 created += 1
             else:
@@ -454,12 +549,14 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                          confidence=?,
                          first_seen=CASE WHEN first_seen IS NULL OR first_seen<? THEN first_seen ELSE ? END,
                          last_seen=CASE WHEN last_seen IS NULL OR last_seen<? THEN ? ELSE last_seen END,
-                         sources_json=?
+                         sources_json=?,
+                         port=COALESCE(?, port),
+                         protocol=COALESCE(?, protocol)
                        WHERE asset_id=?""",
                     (draft.scope_status, confidence,
                      first_seen, first_seen,
                      last_seen, last_seen,
-                     sources_payload, asset_id),
+                     sources_payload, draft.port, draft.protocol, asset_id),
                 )
                 updated += 1
 
@@ -502,27 +599,49 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                 status = "candidate"  # weak relations are never confirmed
             elif _stored_scope_status(connection, task_id, to_asset["asset_id"]) == "confirmed" and strength == "strong":
                 status = "confirmed"
+            latest_observation = workspace.latest.get((from_key, relation_type))
+            in_latest = any(item["observation_id"] == latest_observation
+                            for item in entry["provenance"])
             existing_relation = connection.execute(
-                """SELECT relation_id,provenance_json FROM asset_relation
+                """SELECT relation_id,provenance_json,current_status FROM asset_relation
                    WHERE from_asset_id=? AND to_asset_id=? AND relation_type=?""",
                 (from_asset["asset_id"], to_asset["asset_id"], relation_type),
             ).fetchone()
             if existing_relation is None:
+                lifecycle, transition = _lifecycle_for_new(in_latest)
                 connection.execute(
                     """INSERT INTO asset_relation(relation_id,task_id,from_asset_id,to_asset_id,
-                                                  relation_type,relation_strength,status,provenance_json)
-                       VALUES(?,?,?,?,?,?,?,?)""",
+                                                  relation_type,relation_strength,status,provenance_json,
+                                                  current_status,last_transition)
+                       VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (f"relation-{uuid.uuid4().hex[:16]}", task_id, from_asset["asset_id"],
-                     to_asset["asset_id"], relation_type, strength, status, provenance),
+                     to_asset["asset_id"], relation_type, strength, status, provenance,
+                     lifecycle, transition),
                 )
                 relations_created += 1
             else:
                 merged = _merge_provenance(existing_relation["provenance_json"], entry["provenance"])
+                lifecycle, transition = _lifecycle_transition(
+                    existing_relation["current_status"], in_latest)
                 connection.execute(
-                    "UPDATE asset_relation SET provenance_json=? WHERE relation_id=?",
-                    (json.dumps(merged, ensure_ascii=True, sort_keys=True), existing_relation["relation_id"]),
+                    """UPDATE asset_relation SET provenance_json=?, current_status=?, last_transition=?
+                       WHERE relation_id=?""",
+                    (json.dumps(merged, ensure_ascii=True, sort_keys=True),
+                     lifecycle, transition, existing_relation["relation_id"]),
                 )
                 relations_updated += 1
+
+        # asset-level rollup: a non-scope asset with relations but no current
+        # one has disappeared from every latest observation set
+        connection.execute(
+            """UPDATE asset SET current_status='disappeared'
+               WHERE task_id=? AND scope_status!='confirmed'
+                 AND current_status!='disappeared'
+                 AND EXISTS (SELECT 1 FROM asset_relation r WHERE r.to_asset_id=asset.asset_id)
+                 AND NOT EXISTS (SELECT 1 FROM asset_relation r WHERE r.to_asset_id=asset.asset_id
+                                 AND r.current_status IN ('current','new'))""",
+            (task_id,),
+        )
 
     return MergeSummary(
         status="completed",
@@ -543,6 +662,27 @@ def _stored_scope_status(connection, task_id: str, asset_id: str) -> str:
         (task_id, asset_id),
     ).fetchone()
     return row["scope_status"] if row else "candidate"
+
+
+def _lifecycle_for_new(in_latest: bool) -> tuple[str, str]:
+    """A relation created this run: current when backed by the latest data,
+    historical (disappeared) when only older observations mention it."""
+    if in_latest:
+        return "current", "new"
+    return "disappeared", "new"
+
+
+def _lifecycle_transition(previous: str | None, in_latest: bool) -> tuple[str, str | None]:
+    """Vocabulary per task plan: 新增=new, 删除=disappeared,
+    重现/临时变化=reappeared, 变化=值集合差异的组合表现, 未知=unknown."""
+    previous = previous or "current"
+    if in_latest:
+        if previous in {"disappeared", "unknown"}:
+            return "current", "reappeared"
+        return "current", None  # no state change
+    if previous in {"current", "new"}:
+        return "disappeared", "disappeared"
+    return previous, None  # already disappeared: stays, no transition
 
 
 def _merge_provenance(existing_json: str, additions: list[dict[str, Any]]) -> list[dict[str, Any]]:
