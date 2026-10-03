@@ -71,6 +71,11 @@ WHOIS（端口 43，只提取白名单字段），回退结果明确标记
 关系——组织名或 ASN 相同绝不确认资产归属；ASN 直查在 R4 归并层提供绑定依据前
 被拒绝。
 
+R4.1 起提供离线资产归并：`surface-intel merge <task-id> --task-root .\task`
+把 DNS/CT/RDAP 观察幂等归并为统一资产模型（domain/ip/cidr/asn/organization、
+强/中关联、来源 provenance、置信度、first/last seen 分层、冲突保留）。
+归并纯本地计算，不发起网络请求；弱关联与归属类资产永不确认。
+
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。

@@ -47,3 +47,9 @@ R3.3 增加被动注册数据入口：`rdap-health --real` 只报告端点配置
 `SURFACE_INTEL_RDAP_ENDPOINT` 覆盖；TLD 无 RDAP 时自动回退 WHOIS（端口 43，
 `whois_text_unverified` 许可标记）。ASN 直查被 `asn_scope_binding_deferred` 拒绝
 （R4 归并层提供绑定依据后放开）；重复执行是合法重新观察。
+
+R4.1 增加离线归并入口：`surface-intel merge <task-id> --task-root .\task` 读取
+任务全部 observation（当前覆盖 dns_resolver/ct_log/rdap_lookup，其他来源计入
+skipped），幂等地生成/更新统一资产、关系和冲突行。归并不发起任何网络请求、
+不修改任务状态，可重复执行：first_seen 保留、last_seen 推进、历史值并存、
+属性冲突写 `asset_conflict`（unresolved）而非择值。

@@ -63,6 +63,20 @@ R3.4 统一收口：三个被动源的观察写入合并到
 `RedactingFormatter` 兜底）。跨源元数据契约、冲突共存、定案否定、超时/限流和
 许可不可用由 `tests/integration/test_r3_multisource.py` 统一约束。
 
+Migration 8（R4.1 资产归并）：`asset` 扩展 `first_seen`/`last_seen`/
+`sources_json`（provenance：来源+observation_id 列表）；新增 `asset_relation`
+（from/to asset、`relation_type`、`relation_strength` strong/medium/weak、
+status candidate/confirmed、`provenance_json`，UNIQUE(from,to,type) 幂等）和
+`asset_conflict`（asset、attribute、`values_json` 多来源冲突值、status 默认
+unresolved）。归并引擎 `merger.py` 从三被动源 observation 提取 domain/ip/
+cidr/asn/organization 资产：强关联（DNS 解析、证书绑定）与中等关联（组织/
+注册商/CIDR/ASN）按计划 §12.2 分级；置信度 = 最强关联基线（strong 0.7/
+medium 0.5/weak 0.25）+ 多源佐证（每额外来源 +0.1，上限 +0.2），候选上限
+0.95，仅用户 scope 锚点为 1.0；弱关联永不确认，organization/cidr/asn 永远
+candidate。当前/历史分层：重复归并保留 first_seen、推进 last_seen、多个历史
+值并存不覆盖；属性冲突（organization/registrar/asn 多值）写 unresolved
+冲突行，不静默择值。未知来源（如 fofa）观察计入 skipped，待后续增量接入。
+
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
 `review_item`、`subtask` 和 `agent_lease`，并通过迁移演进。

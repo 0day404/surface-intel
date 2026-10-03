@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Database:
@@ -96,7 +96,31 @@ class Database:
                     scope_status TEXT NOT NULL,
                     architecture_status TEXT NOT NULL DEFAULT 'unknown',
                     confidence REAL NOT NULL DEFAULT 0,
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    sources_json TEXT NOT NULL DEFAULT '[]',
                     UNIQUE(task_id, asset_type, normalized_value)
+                );
+                CREATE TABLE IF NOT EXISTS asset_relation (
+                    relation_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    from_asset_id TEXT NOT NULL REFERENCES asset(asset_id),
+                    to_asset_id TEXT NOT NULL REFERENCES asset(asset_id),
+                    relation_type TEXT NOT NULL,
+                    relation_strength TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    provenance_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(from_asset_id, to_asset_id, relation_type)
+                );
+                CREATE TABLE IF NOT EXISTS asset_conflict (
+                    conflict_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    asset_id TEXT NOT NULL REFERENCES asset(asset_id),
+                    attribute TEXT NOT NULL,
+                    values_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'unresolved',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS gap (
                     gap_id TEXT PRIMARY KEY,
@@ -253,6 +277,18 @@ class Database:
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (5)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (6)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (7)")
+            # migration 8: asset model extension (merge layer) - time layering
+            # and provenance columns on existing databases; new relation and
+            # conflict tables above are covered by CREATE TABLE IF NOT EXISTS.
+            asset_columns = {row[1] for row in db.execute("PRAGMA table_info(asset)").fetchall()}
+            for name, definition in (
+                ("first_seen", "TEXT"),
+                ("last_seen", "TEXT"),
+                ("sources_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if name not in asset_columns:
+                    db.execute(f"ALTER TABLE asset ADD COLUMN {name} {definition}")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (8)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

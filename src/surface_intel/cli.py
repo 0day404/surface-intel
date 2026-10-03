@@ -467,6 +467,35 @@ def cmd_rdap_lookup(args: argparse.Namespace) -> int:
     return 0 if result.status == "completed" else 2
 
 
+def cmd_merge(args: argparse.Namespace) -> int:
+    from surface_intel.merger import merge_task_observations
+
+    db = Database(_config(args).database_path)
+    db.initialize()
+    task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
+    scope_row = next(db.rows(
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+    ), None)
+    if task is None or scope_row is None:
+        print(json.dumps({"ok": False, "error": "task_or_scope_not_found"}))
+        return 2
+    scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+    summary = merge_task_observations(db, args.task_id, scope)
+    print(json.dumps({
+        "ok": summary.status == "completed",
+        "task_id": args.task_id,
+        "observations_processed": summary.observations_processed,
+        "observations_skipped": summary.observations_skipped,
+        "assets_created": summary.assets_created,
+        "assets_updated": summary.assets_updated,
+        "relations_created": summary.relations_created,
+        "relations_updated": summary.relations_updated,
+        "conflicts_created": summary.conflicts_created,
+        "skipped": list(summary.skipped),
+    }, ensure_ascii=True))
+    return 0 if summary.status == "completed" else 2
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
@@ -517,7 +546,7 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -560,7 +589,7 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--kind", choices=TARGET_KINDS, default="domain")
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
-        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel"}:
+        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")

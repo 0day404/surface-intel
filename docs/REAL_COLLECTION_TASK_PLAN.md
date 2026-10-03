@@ -357,9 +357,15 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
       service、product、version、organization、sources、evidence_refs、
       confidence、scope_status、architecture_status、first_seen、last_seen、
       current_status、historical_status。
-- [ ] 增加 service、certificate、relationship 或等价关联表，避免把所有信息
-      压成单一 asset 行。
+      （R4.1 已含 domain/ip/cidr/asn/organization + sources/provenance/
+      confidence/scope_status/first_seen/last_seen；port/protocol/service/
+      product 等随 FOFA 与主动源接入扩展）
+- [x] 增加 service、certificate、relationship 或等价关联表，避免把所有信息
+      压成单一 asset 行。（2026-10-03 R4.1：`asset_relation` + `asset_conflict`，
+      migration 8）
 - [ ] 所有规范化值保留原始值引用、规范化规则版本和冲突记录。
+      （R4.1 已含 observation 引用级 provenance 与冲突记录；规范化规则版本
+      标识待补）
 
 ### 4.2 归并与冲突
 
