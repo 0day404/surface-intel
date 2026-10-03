@@ -4,6 +4,7 @@ Version: 0.1.0
 Summary: Authorized attack-surface intelligence orchestration skill
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: dnspython<3,>=2.6
 Requires-Dist: openpyxl<4,>=3.1
 Requires-Dist: pydantic<3,>=2.0
 Provides-Extra: dev
@@ -12,7 +13,38 @@ Requires-Dist: pytest-asyncio<1,>=0.23; extra == "dev"
 
 # surface-intel
 
-`surface-intel` 是一个授权范围内的攻击面情报编排器。P0 只提供离线项目骨架、
+`surface-intel` 是一个授权范围内的攻击面情报编排器。当前已提供离线 P0-P3
+最小闭环：
+
+- `init`、`create`、`preflight`、`plan`、`run`、`status`、`validate`、`report`；
+- 范围标准化、排除项优先、动作幂等、Mock 被动/FOFA 多页适配器；
+- SQLite 观察/证据/资产/缺口索引，以及可重建 JSON/XLSX。
+- P4 安全主动门控、能力矩阵、Safe HTTP/Port 适配器和 P5 checkpoint/崩溃恢复。
+- P6 子任务租约/心跳/重复结果保护，以及外部 Playwright MCP 公开页面观察边界。
+
+P6 的 Playwright 连接通过注入的 MCP 调用边界测试；项目不复制 Playwright 源码、
+`node_modules`、浏览器缓存或凭据。
+
+`run` 支持 `--mode serial|delegated|hybrid`；三种模式共享同一持久化状态和安全门控。
+恢复时读取 checkpoint，未知外部终态不会被自动重放。
+
+当前真实数据源仍需单独配置和契约验证。适配器能力状态明确区分
+`available`、`degraded`、`not_configured`、`unsupported` 和 `failed`；Mock
+适配器只用于离线测试，不能证明真实 FOFA、DNS、CT、RDAP 或 Playwright 已接通。
+
+真实 FOFA 入口是显式受控的：
+
+```powershell
+uv run surface-intel fofa-health --real
+uv run surface-intel fofa-search --task-root .\task <task-id> --domain example.com --real --confirm-real
+```
+
+查询命令要求任务范围已确认、域名在授权范围内，并通过独立
+`E:\Work\Copilot\fofa-mcp` 的 stdio MCP 进程调用；凭据只由 FOFA MCP 自己从其
+受控环境读取，不进入 `surface-intel` 参数、SQLite 或报告。未配置或连接失败时
+返回 `not_configured`/失败状态，不伪造结果。
+
+P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。
 

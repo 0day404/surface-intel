@@ -1,3 +1,4 @@
+dnspython<3,>=2.6
 openpyxl<4,>=3.1
 pydantic<3,>=2.0
 
