@@ -468,6 +468,7 @@ def cmd_rdap_lookup(args: argparse.Namespace) -> int:
 
 
 def cmd_merge(args: argparse.Namespace) -> int:
+    from surface_intel.architecture import annotate_architecture
     from surface_intel.merger import merge_task_observations
 
     db = Database(_config(args).database_path)
@@ -481,8 +482,9 @@ def cmd_merge(args: argparse.Namespace) -> int:
         return 2
     scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
     summary = merge_task_observations(db, args.task_id, scope)
+    architecture = annotate_architecture(db, args.task_id)
     print(json.dumps({
-        "ok": summary.status == "completed",
+        "ok": summary.status == "completed" and architecture.status == "completed",
         "task_id": args.task_id,
         "observations_processed": summary.observations_processed,
         "observations_skipped": summary.observations_skipped,
@@ -491,9 +493,11 @@ def cmd_merge(args: argparse.Namespace) -> int:
         "relations_created": summary.relations_created,
         "relations_updated": summary.relations_updated,
         "conflicts_created": summary.conflicts_created,
+        "architecture_classified": architecture.assets_classified,
+        "architecture_third_party": architecture.assets_third_party,
         "skipped": list(summary.skipped),
     }, ensure_ascii=True))
-    return 0 if summary.status == "completed" else 2
+    return 0 if summary.status == "completed" and architecture.status == "completed" else 2
 
 
 def cmd_report(args: argparse.Namespace) -> int:

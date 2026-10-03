@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class Database:
@@ -99,6 +99,7 @@ class Database:
                     first_seen TEXT,
                     last_seen TEXT,
                     sources_json TEXT NOT NULL DEFAULT '[]',
+                    architecture_json TEXT NOT NULL DEFAULT '[]',
                     UNIQUE(task_id, asset_type, normalized_value)
                 );
                 CREATE TABLE IF NOT EXISTS asset_relation (
@@ -289,6 +290,10 @@ class Database:
                 if name not in asset_columns:
                     db.execute(f"ALTER TABLE asset ADD COLUMN {name} {definition}")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (8)")
+            # migration 9: architecture identification evidence (R4.2)
+            if "architecture_json" not in asset_columns:
+                db.execute("ALTER TABLE asset ADD COLUMN architecture_json TEXT NOT NULL DEFAULT '[]'")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (9)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

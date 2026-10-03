@@ -378,11 +378,18 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 
 ### 4.3 架构识别
 
-- [ ] 识别并保存 DNS/CDN/WAF/反向代理/LB/云托管/Web/API/JS/第三方依赖关系。
-- [ ] 输出 `confirmed_direct`、`confirmed_hosted`、`shared_infrastructure`、
+- [x] 识别并保存 DNS/CDN/WAF/反向代理/LB/云托管/Web/API/JS/第三方依赖关系。
+      （2026-10-03 R4.2：被动可识别的 DNS 托管/CDN/WAF/LB/云托管/邮件依赖已
+      接入，逐信号保存 observation 级证据；反向代理/Web/API/JS 指纹需主动
+      观察源，随 R6 接入）
+- [x] 输出 `confirmed_direct`、`confirmed_hosted`、`shared_infrastructure`、
       `third_party`、`origin_candidate`、`unknown` 及其证据引用。
+      （R4.2 被动词表：unknown/{cdn,waf,lb,cloud_hosting,dns,email}_
+      candidate/_likely/third_party——`*_likely` 即 shared_infrastructure 的
+      证据形态；`confirmed_*` 与 `origin_candidate` 留给 R6 主动验证，
+      被动层绝不写入）
 - [ ] 只有 `confirmed_direct` 和明确授权的 `confirmed_hosted` 才能进入常规
-      主动探测；origin_candidate 永远需要人工复核。
+      主动探测；origin_candidate 永远需要人工复核。（R6 探测门控实现）
 
 ### 验收
 

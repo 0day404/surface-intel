@@ -63,6 +63,18 @@ R3.4 统一收口：三个被动源的观察写入合并到
 `RedactingFormatter` 兜底）。跨源元数据契约、冲突共存、定案否定、超时/限流和
 许可不可用由 `tests/integration/test_r3_multisource.py` 统一约束。
 
+Migration 9（R4.2 架构识别）：`asset` 扩展 `architecture_json`（分类证据数组，
+每条含 vendor/category/matched_on/value/signal/source/observation_id——逐条可
+溯源）。`architecture_status` 词表冻结为：`unknown`、
+`{cdn,waf,lb,cloud_hosting,dns,email}_candidate/_likely`、`third_party`。
+单一厂商信号 → `*_candidate`；同类两份以上独立信号佐证 → `*_likely`（多
+likely 类别按 cdn>waf>lb>cloud_hosting>dns>email 取优先）。计划要求的
+`confirmed_direct`/`confirmed_hosted`/`origin_candidate` 属主动阶段（R6）与
+人工复核，被动识别层绝不写入；`third_party` 标记被确认资产关联出的范围外
+资产，不改变 scope_status。识别基于静态厂商签名（域名后缀/组织与签发者关键
+词，代码内冻结并在 ADAPTERS.md 记录），证据确定性重算——重复 annotate
+字节级一致。
+
 Migration 8（R4.1 资产归并）：`asset` 扩展 `first_seen`/`last_seen`/
 `sources_json`（provenance：来源+observation_id 列表）；新增 `asset_relation`
 （from/to asset、`relation_type`、`relation_strength` strong/medium/weak、

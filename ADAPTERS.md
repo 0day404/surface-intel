@@ -53,6 +53,18 @@ User-Agent（通用 python-urllib UA 被 ctlogs.dev 403）。跨源共性：ctlo
 contains 类匹配噪声（如 `notexample.org` 匹配 `example.com` 查询）与 crt.sh
 一样会经匹配名分类升级为 `needs_review`，不产生 `confirmed`。
 
+R4.2 架构识别（`architecture.py`，随 `merge` 命令执行）：基于静态厂商签名
+（`VENDOR_SUFFIXES` 域名后缀：cloudflare/akamai/cloudfront/fastly/cdn77/
+azure-cdn/imperva/aws-elb/azure-traffic-manager/aws/azure/google-cloud/
+route53/ultradns/outlook/google-workspace 等；`ORG_KEYWORDS` 组织与证书签发
+者关键词）对合并资产分类。信号来源：DNS CNAME/NS 目标后缀、RDAP 组织/注册商
+关键词、CT 证书签发者关键词。单一信号 → `{category}_candidate`，同类两份
+独立信号 → `{category}_likely`（类别优先级 cdn>waf>lb>cloud_hosting>dns>
+email）；范围外关联资产 → `third_party`。**绝不写入** confirmed_* /
+origin_candidate（R6 主动阶段与人工复核专用）；分类不改变 scope_status；
+每条证据携带 observation_id 可溯源，重复执行字节级一致。签名表为冻结的启发
+式种子，按需扩充新签名而非放宽匹配规则。
+
 R3.2 补充（自动故障转移）：`SURFACE_INTEL_CT_SOURCE` 默认 `auto`——
 `FailoverCtClient` 以 crt.sh 为主源、ctlogs.dev 为备源。仅当主源返回基础设施
 失败（rate_limited/timeout/http_error/invalid_response/transport 死亡）时才

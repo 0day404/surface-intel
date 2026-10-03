@@ -198,10 +198,12 @@ class _MergeWorkspace:
                 asset_type=asset_type,
                 normalized_value=normalized,
                 scope_status=classify_asset_scope(self.scope, asset_type, normalized),
-                scope_anchored=scope_anchored,
             )
             self.assets[key] = draft
-        if scope_anchored:
+        if scope_anchored and self.scope.is_in_scope(normalized):
+            # Anchoring marks the user-confirmed scope only for values the
+            # scope document actually authorizes - a tainted or imported
+            # observation can never mint confirmation by being a target.
             draft.scope_anchored = True
             draft.scope_status = "confirmed"
         draft.sources.append({"source": source, "observation_id": observation_id})
