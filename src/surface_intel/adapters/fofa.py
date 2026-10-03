@@ -70,6 +70,7 @@ class FofaMcpAdapter:
             cost_units=int(payload.get("cost_units", 0)),
             request_id=payload.get("request_id"),
             error=payload.get("error"),
+            evidence_refs=[str(payload.get("consumed_fpoint"))] if payload.get("consumed_fpoint") is not None else [],
         )
 
     async def cancel(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:

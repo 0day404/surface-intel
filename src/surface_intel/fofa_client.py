@@ -107,6 +107,8 @@ class StdioJsonRpcTransport:
     async def close(self) -> None:
         if self.process is None:
             return
+        if self.process.stdin is not None:
+            self.process.stdin.close()
         if self.process.returncode is None:
             self.process.terminate()
             try:

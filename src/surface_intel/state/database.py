@@ -150,6 +150,8 @@ class Database:
                     cursor TEXT,
                     next_token TEXT,
                     cost_units INTEGER NOT NULL DEFAULT 0,
+                    estimated_fpoints INTEGER NOT NULL DEFAULT 0,
+                    consumed_fpoints INTEGER NOT NULL DEFAULT 0,
                     result_count INTEGER NOT NULL DEFAULT 0,
                     error_code TEXT,
                     UNIQUE(task_id, query_fingerprint, batch_index)
@@ -224,6 +226,13 @@ class Database:
             ):
                 if name not in columns:
                     db.execute(f"ALTER TABLE action ADD COLUMN {name} {definition}")
+            batch_columns = {row[1] for row in db.execute("PRAGMA table_info(fofa_query_batch)").fetchall()}
+            for name, definition in (
+                ("estimated_fpoints", "INTEGER NOT NULL DEFAULT 0"),
+                ("consumed_fpoints", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in batch_columns:
+                    db.execute(f"ALTER TABLE fofa_query_batch ADD COLUMN {name} {definition}")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (2)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (3)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (4)")

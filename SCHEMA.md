@@ -17,6 +17,8 @@ Migration 5 增加 `budget` 表，支持按任务和预算类型进行事务性�
 用于并发执行时避免成本超卖。
 Migration 6 增加 `fofa_query_batch` 和 `fofa_cursor`，持久化 FOFA 查询指纹、
 拆分批次、分页 token、request id、成本、结果数量和独立失败状态。
+R2 收尾扩展批次的 `estimated_fpoints` 与 `consumed_fpoints`，并将 FOFA 搜索、
+stats、host 和 account 操作的脱敏结果写入统一 evidence/observation 索引。
 
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、

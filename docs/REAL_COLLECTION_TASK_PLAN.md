@@ -176,6 +176,16 @@ next token、成本、结果数量和单批失败隔离。`uv run pytest -q` 结
 后总计 `43 passed`。当前没有使用真实凭据或真实授权目标，因此尚未执行真实
 FOFA smoke test。
 
+**R2 收尾增量实际验证**：新增安全的超长查询拆分、`estimated_fpoints`/
+`consumed_fpoints` 批次字段、FOFA 搜索结果 evidence/observation 持久化，以及
+stats/host/account 操作的 evidence-only 记录。执行了
+`uv run surface-intel fofa-health --real`，外部 `fofa-mcp` stdio 进程成功返回
+健康配置结果；该工具不发起远程 FOFA 搜索。全套测试为 `46 passed`。
+
+真实搜索 smoke test 未执行：当前没有由用户指定的授权任务和授权域名，不能
+猜测目标或把任意域名作为真实查询对象。下一次真实 smoke test 必须使用已确认
+scope、明确域名、独立预算和受控凭据环境。
+
 ## R2：FOFA 生产闭环
 
 **目标**：通过独立 FOFA MCP 适配器完成真实健康检查、查询、分页、游标、
@@ -202,14 +212,14 @@ FOFA smoke test。
 
 - [ ] 对域名、子域、IP、CIDR、ASN、证书 CN/SAN、组织和已确认资产生成查询
       计划；每条查询保存规范化输入、查询指纹、来源依据和预期字段。
-- [x] 实现批次持久化基础，保留 `parent_query_id`、`batch_index`、拆分原因和
+- [x] 实现超长查询拆分，保留 `parent_query_id`、`batch_index`、拆分原因和
       合并顺序。
 - [x] 每个批次有独立记录、恢复状态、request id、成本、
       返回字段和失败状态。
 - [x] 无 `next_token` 时由 adapter 选择初始 search；有 token 时选择
       `fofa_search_next`，cursor 可持久化后恢复。
       后再继续分页。
-- [ ] FOFA stats 只作为统计证据，不直接写入资产清单；host 结果必须与查询
+- [x] FOFA stats 只作为统计证据，不直接写入资产清单；host 结果必须与查询
       observation/evidence 关联。
 
 ### 2.3 恢复与质量

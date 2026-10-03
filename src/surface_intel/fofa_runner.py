@@ -8,6 +8,11 @@ from .adapters.fofa import FofaMcpAdapter
 from .state.database import Database
 from .state.fofa import FofaBatchRepository
 from .planning import query_fingerprint
+from .fofa_queries import split_fofa_query
+from .redaction import redact
+import hashlib
+import json
+import uuid
 
 
 @dataclass(frozen=True)
@@ -18,6 +23,27 @@ class FofaRunResult:
     cost_units: int
     batch_id: str
     error: str | None = None
+
+
+def _store_fofa_observations(db: Database, task_id: str, result: Any) -> None:
+    with db.connect() as connection:
+        for item in result.observations:
+            payload = redact(item)
+            raw = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+            evidence_id = f"evidence-{uuid.uuid4().hex[:16]}"
+            connection.execute(
+                """INSERT INTO evidence(evidence_id,task_id,source,summary,sha256,redaction_status)
+                   VALUES(?,?,?,?,?,?)""",
+                (evidence_id, task_id, "fofa_mcp", raw[:500],
+                 hashlib.sha256(raw.encode()).hexdigest(), "redacted"),
+            )
+            connection.execute(
+                """INSERT INTO observation(observation_id,task_id,source,target,payload_json,evidence_id)
+                   VALUES(?,?,?,?,?,?)""",
+                (f"observation-{uuid.uuid4().hex[:16]}", task_id, "fofa_mcp",
+                 str(item.get("host") or item.get("ip") or item.get("target") or ""),
+                 raw, evidence_id),
+            )
 
 
 async def run_fofa_query(
@@ -32,6 +58,8 @@ async def run_fofa_query(
     size: int = 100,
     max_pages: int = 20,
 ) -> FofaRunResult:
+    if len(query) > 4096:
+        raise ValueError("query_requires_split")
     fingerprint = query_fingerprint(query)
     batches = FofaBatchRepository(db)
     batch_id = batches.create_batch(task_id, fingerprint, query, scope_version, batch_index=batch_index)
@@ -61,6 +89,7 @@ async def run_fofa_query(
                 batches.fail(batch_id, result.error or result.status)
                 return FofaRunResult(result.status, observations, page - 1, cost, batch_id, result.error)
             observations += len(result.observations)
+            _store_fofa_observations(db, task_id, result)
             cost += result.cost_units
             token = result.next_token
             batches.complete(
@@ -69,6 +98,8 @@ async def run_fofa_query(
                 next_token=token,
                 cost_units=cost,
                 result_count=observations,
+                estimated_fpoints=result.cost_units,
+                consumed_fpoints=result.cost_units,
                 finished=not result.has_more,
             )
             if not result.has_more:
@@ -83,3 +114,52 @@ async def run_fofa_query(
     except Exception as exc:
         batches.fail(batch_id, type(exc).__name__)
         return FofaRunResult("failed", observations, page - 1, cost, batch_id, type(exc).__name__)
+
+
+async def run_fofa_query_batches(
+    db: Database,
+    client: Any,
+    *,
+    task_id: str,
+    scope_version: str,
+    query: str,
+    context: TaskContext,
+    max_query_length: int = 4096,
+    size: int = 100,
+    max_pages: int = 20,
+) -> list[FofaRunResult]:
+    batches = split_fofa_query(query, max_query_length)
+    results: list[FofaRunResult] = []
+    for batch in batches:
+        results.append(await run_fofa_query(
+            db, client, task_id=task_id, scope_version=scope_version,
+            query=batch.query, context=context, batch_index=batch.batch_index,
+            size=size, max_pages=max_pages,
+        ))
+    return results
+
+
+async def run_fofa_operation(
+    db: Database,
+    client: Any,
+    *,
+    task_id: str,
+    scope_version: str,
+    tool: str,
+    arguments: dict[str, Any],
+    context: TaskContext,
+) -> FofaRunResult:
+    """Run stats/host/account operations and persist their evidence without creating assets."""
+    adapter = FofaMcpAdapter(client)
+    payload = dict(arguments)
+    payload["tool"] = tool
+    result = await adapter.execute(payload, context)
+    _store_fofa_observations(db, task_id, result)
+    return FofaRunResult(
+        result.status,
+        len(result.observations),
+        1,
+        result.cost_units,
+        f"fofa-operation-{uuid.uuid4().hex[:16]}",
+        result.error,
+    )
