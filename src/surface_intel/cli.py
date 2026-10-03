@@ -184,6 +184,11 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
     if not scope.is_in_scope(args.domain):
         print(json.dumps({"ok": False, "error": "target_out_of_scope"}, ensure_ascii=True))
         return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.COLLECTING_FOFA.value, args.task_id),
+        )
     client = configured_fofa_client()
     async def call():
         try:
@@ -203,6 +208,16 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(json.dumps({"ok": False, "status": "failed", "error": type(exc).__name__}, ensure_ascii=True))
         return 2
+    final_status = (
+        TaskStatus.COMPLETED.value if result.status in {"completed", "already_completed"}
+        else TaskStatus.PARTIAL.value if result.status == "partial"
+        else TaskStatus.FAILED.value
+    )
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (final_status, args.task_id),
+        )
     print(json.dumps({
         "ok": result.status == "completed",
         "status": result.status,

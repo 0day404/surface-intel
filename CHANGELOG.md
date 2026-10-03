@@ -10,3 +10,5 @@
 - schema version 更新至 3，记录 P6 checkpoint。
 - 增加 P6 后恢复硬化：FOFA checkpoint 续跑、动作终态、暂停/取消停止、报告恢复摘要和运行模式参数。
 - 增加最终验收质量门和重复运行幂等测试，防止不完整任务误报 `complete`。
+- R2: 增加 FOFA 查询计划、拆分批次元数据、F 点覆盖摘要和真实任务状态推进；
+  完成授权域名的被动真实 smoke test，当前能力标记为 bounded。

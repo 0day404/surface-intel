@@ -41,6 +41,12 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
     evidence = [dict(row) for row in db.rows("SELECT * FROM evidence WHERE task_id=?", (task_id,))]
     events = [dict(row) for row in db.rows("SELECT * FROM event WHERE task_id=? ORDER BY created_at", (task_id,))]
     checkpoints = [dict(row) for row in db.rows("SELECT * FROM checkpoint WHERE task_id=? ORDER BY created_at", (task_id,))]
+    fofa_batches = [dict(row) for row in db.rows(
+        "SELECT * FROM fofa_query_batch WHERE task_id=? ORDER BY batch_index, batch_id", (task_id,)
+    )]
+    fofa_plans = [dict(row) for row in db.rows(
+        "SELECT * FROM fofa_query_plan WHERE task_id=? ORDER BY created_at", (task_id,)
+    )]
     unknown_actions = sum(1 for row in db.rows(
         "SELECT status FROM action WHERE task_id=? AND status='unknown'", (task_id,)
     ))
@@ -66,6 +72,19 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         "evidence": evidence,
         "events": events,
         "checkpoints": checkpoints,
+        "fofa": {
+            "plans": fofa_plans,
+            "batches": fofa_batches,
+            "coverage": {
+                "planned": len(fofa_plans),
+                "batches": len(fofa_batches),
+                "completed_batches": sum(row["status"] == "completed" for row in fofa_batches),
+                "failed_batches": sum(row["status"] == "failed" for row in fofa_batches),
+                "observations": sum(row["result_count"] for row in fofa_batches),
+                "estimated_fpoints": sum(row["estimated_fpoints"] for row in fofa_batches),
+                "consumed_fpoints": sum(row["consumed_fpoints"] for row in fofa_batches),
+            },
+        },
         "recovery_summary": {
             "last_checkpoint": checkpoints[-1]["checkpoint_id"] if checkpoints else None,
             "recoverable": bool(checkpoints),
@@ -104,6 +123,13 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         report["recovery_summary"]["failed_actions"],
         report["recovery_summary"]["pending_actions"],
     ])
+    fofa_sheet = workbook.create_sheet("FOFA查询")
+    fofa_sheet.append(["query_plan_count", "batch_count", "completed_batches", "failed_batches",
+                       "observations", "estimated_fpoints", "consumed_fpoints"])
+    coverage = report["fofa"]["coverage"]
+    fofa_sheet.append([coverage["planned"], coverage["batches"], coverage["completed_batches"],
+                       coverage["failed_batches"], coverage["observations"],
+                       coverage["estimated_fpoints"], coverage["consumed_fpoints"]])
     workbook.save(output / "result.xlsx")
     return report
 

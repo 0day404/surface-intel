@@ -59,12 +59,18 @@ async def run_fofa_query(
     batch_index: int = 1,
     size: int = 100,
     max_pages: int = 20,
+    parent_query_id: str | None = None,
+    split_reason: str | None = None,
 ) -> FofaRunResult:
     if len(query) > 4096:
         raise ValueError("query_requires_split")
     fingerprint = query_fingerprint(query)
     batches = FofaBatchRepository(db)
-    batch_id = batches.create_batch(task_id, fingerprint, query, scope_version, batch_index=batch_index)
+    batch_id = batches.create_batch(
+        task_id, fingerprint, query, scope_version,
+        batch_index=batch_index, parent_query_id=parent_query_id,
+        split_reason=split_reason,
+    )
     existing = next(db.rows("SELECT status FROM fofa_query_batch WHERE batch_id=?", (batch_id,)), None)
     if existing and existing["status"] == "completed":
         row = next(db.rows("SELECT result_count,cost_units FROM fofa_query_batch WHERE batch_id=?", (batch_id,)), None)
@@ -76,6 +82,8 @@ async def run_fofa_query(
     page = 1
     observations = 0
     cost = 0
+    consumed_fpoints_total = 0
+    required_fpoints_total = 0
     try:
         while page <= max_pages:
             action: dict[str, Any] = {
@@ -95,8 +103,8 @@ async def run_fofa_query(
             observations += len(result.observations)
             _store_fofa_observations(db, task_id, result)
             cost += result.cost_units
-            consumed_fpoints = result.consumed_fpoints
-            required_fpoints = result.required_fpoints
+            consumed_fpoints_total += result.consumed_fpoints or 0
+            required_fpoints_total += result.required_fpoints or 0
             token = result.next_token
             batches.complete(
                 batch_id,
@@ -104,14 +112,14 @@ async def run_fofa_query(
                 next_token=token,
                 cost_units=cost,
                 result_count=observations,
-                estimated_fpoints=required_fpoints or 0,
-                consumed_fpoints=consumed_fpoints or 0,
+                estimated_fpoints=required_fpoints_total,
+                consumed_fpoints=consumed_fpoints_total,
                 finished=not result.has_more,
             )
             if not result.has_more:
                 return FofaRunResult(
                     "completed", observations, page, cost, batch_id,
-                    consumed_fpoints, required_fpoints,
+                    consumed_fpoints_total, required_fpoints_total,
                 )
             if not token:
                 batches.fail(batch_id, "missing_next_token")
@@ -138,12 +146,20 @@ async def run_fofa_query_batches(
     max_pages: int = 20,
 ) -> list[FofaRunResult]:
     batches = split_fofa_query(query, max_query_length)
+    parent_query_id = f"fofa-query-{query_fingerprint(query)[:24]}"
+    FofaBatchRepository(db).create_plan(
+        task_id, parent_query_id, query, query_fingerprint(query),
+        purpose="domain_assets", target_ref=query,
+        expected_fields=["ip", "port", "protocol", "host", "domain", "title", "product", "version"],
+        source_basis=["user_authorized_scope"],
+    )
     results: list[FofaRunResult] = []
     for batch in batches:
         results.append(await run_fofa_query(
             db, client, task_id=task_id, scope_version=scope_version,
             query=batch.query, context=context, batch_index=batch.batch_index,
-            size=size, max_pages=max_pages,
+            size=size, max_pages=max_pages, parent_query_id=parent_query_id,
+            split_reason=batch.split_reason,
         ))
     return results
 

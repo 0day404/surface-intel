@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import json
 from typing import Any
 
 from .database import Database
@@ -110,3 +111,34 @@ class FofaBatchRepository:
             None,
         )
         return dict(row) if row else None
+
+    def create_plan(
+        self,
+        task_id: str,
+        parent_query_id: str,
+        query: str,
+        query_fingerprint: str,
+        *,
+        purpose: str,
+        target_ref: str,
+        expected_fields: list[str],
+        source_basis: list[str],
+    ) -> str:
+        plan_id = f"fofa-plan-{uuid.uuid4().hex[:16]}"
+        with self.db.connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO fofa_query_plan
+                   (plan_id,task_id,parent_query_id,query,query_fingerprint,purpose,
+                    target_ref,expected_fields_json,source_basis_json)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan_id, task_id, parent_query_id, query, query_fingerprint,
+                    purpose, target_ref, json.dumps(expected_fields, ensure_ascii=True),
+                    json.dumps(source_basis, ensure_ascii=True),
+                ),
+            )
+            row = connection.execute(
+                "SELECT plan_id FROM fofa_query_plan WHERE task_id=? AND parent_query_id=?",
+                (task_id, parent_query_id),
+            ).fetchone()
+        return str(row["plan_id"])

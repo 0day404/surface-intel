@@ -1,6 +1,6 @@
 # Schema
 
-当前 schema version 为 `1.0`，SQLite migration version 为 `3`。
+当前 schema version 为 `1.0`，SQLite migration version 为 `7`。
 
 适配器能力状态使用 `available`、`degraded`、`not_configured`、`unsupported`
 和 `failed`。能力状态是预检和报告字段；`not_configured`、`unsupported` 或
@@ -19,6 +19,8 @@ Migration 6 增加 `fofa_query_batch` 和 `fofa_cursor`，持久化 FOFA 查询�
 拆分批次、分页 token、request id、成本、结果数量和独立失败状态。
 R2 收尾扩展批次的 `estimated_fpoints` 与 `consumed_fpoints`，并将 FOFA 搜索、
 stats、host 和 account 操作的脱敏结果写入统一 evidence/observation 索引。
+Migration 7 增加 `fofa_query_plan`，保存父查询、目标依据、预期字段和批次覆盖
+关系，使超长查询拆分、结果覆盖率和失败批次可以从 SQLite 重建。
 
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、

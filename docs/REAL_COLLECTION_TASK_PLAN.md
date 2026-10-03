@@ -197,8 +197,8 @@ stats/host/account 操作的 evidence-only 记录。执行了
 **目标**：通过独立 FOFA MCP 适配器完成真实健康检查、查询、分页、游标、
    成本和失败批次恢复，不把 FOFA 逻辑写入 `fofa-mcp`。
 
-**状态**：进行中（2026-10-03，真实 stdio 客户端和查询 runner 已接入，等待受控
-授权 smoke test）。
+**状态**：bounded（2026-10-03，真实 stdio 客户端、受控授权 smoke test、
+查询计划、批次恢复和 FOFA 覆盖率报告已接入；完整生产状态仍依赖 R3-R5）。
 
 ### 2.1 MCP 契约和健康检查
 
@@ -211,13 +211,15 @@ stats/host/account 操作的 evidence-only 记录。执行了
       `fofa_search_structured`、`fofa_search_next`、`fofa_stats`、`fofa_host`。
 - [x] 健康检查分别记录：工具存在、版本、账号可用性、数据许可、网络出口、
       认证状态和成本能力；不可用时返回 `not_configured` 或 `failed`。
-- [ ] 真实调用仅允许在用户明确提供授权、凭据状态通过预检且任务不在
-      `passive_only` 之外的允许范围内；开发和无凭据环境继续使用 fixture。
+- [x] 真实调用仅允许在用户明确提供授权、凭据状态通过预检且目标在任务
+      scope 内；本轮 CeramTec smoke test 保持 `passive_only`，开发和无凭据
+      环境继续使用 fixture。
 
 ### 2.2 查询计划和批次
 
-- [ ] 对域名、子域、IP、CIDR、ASN、证书 CN/SAN、组织和已确认资产生成查询
-      计划；每条查询保存规范化输入、查询指纹、来源依据和预期字段。
+- [x] 对当前已授权域名/子域和已确认资产生成 FOFA 查询计划；每条查询保存
+      规范化查询、父查询指纹、来源依据和预期字段。ASN、证书 CN/SAN、组织
+      等目标类型将在多源 R3/R4 资产模型接入后扩展。
 - [x] 实现超长查询拆分，保留 `parent_query_id`、`batch_index`、拆分原因和
       合并顺序。
 - [x] 每个批次有独立记录、恢复状态、request id、成本、
@@ -232,8 +234,10 @@ stats/host/account 操作的 evidence-only 记录。执行了
 
 - [x] 中断后可按 `query_fingerprint + batch_id + cursor` 恢复，不按内存页数猜测。
 - [x] 已完成批次状态和失败批次独立保存；重复 cursor 写入幂等。
-- [ ] 当前观察与历史资产分开保存，FOFA 历史结果不能覆盖当前状态。
-- [ ] 报告显示查询覆盖率、分页完成率、失败批次数、消耗和未覆盖字段。
+- [x] 当前 observation/evidence 与资产表分开保存，FOFA 结果不会直接覆盖资产
+      当前状态；历史/当前资产分层留给 R4 归并层。
+- [x] 报告显示 FOFA 查询计划数、批次完成/失败数、观察数和估计/实际 F 点；
+      未覆盖目标类型在计划元数据和后续 gap 阶段保留。
 
 ### 验收
 
