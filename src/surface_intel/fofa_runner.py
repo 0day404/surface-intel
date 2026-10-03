@@ -22,6 +22,8 @@ class FofaRunResult:
     pages: int
     cost_units: int
     batch_id: str
+    consumed_fpoints: int | None = None
+    required_fpoints: int | None = None
     error: str | None = None
 
 
@@ -68,7 +70,7 @@ async def run_fofa_query(
         row = next(db.rows("SELECT result_count,cost_units FROM fofa_query_batch WHERE batch_id=?", (batch_id,)), None)
         return FofaRunResult("already_completed", int(row["result_count"]), 0, int(row["cost_units"]), batch_id)
     if not batches.start(batch_id):
-        return FofaRunResult("blocked", 0, 0, 0, batch_id, "batch_not_planned")
+        return FofaRunResult("blocked", 0, 0, 0, batch_id, error="batch_not_planned")
     adapter = FofaMcpAdapter(client)
     token: str | None = None
     page = 1
@@ -80,6 +82,8 @@ async def run_fofa_query(
                 "query": query,
                 "size": size,
                 "page": page,
+                "confirm": True,
+                "task_id": task_id,
                 "request_id": f"surface-{task_id}-{fingerprint[:12]}-{page}",
             }
             if token:
@@ -87,10 +91,12 @@ async def run_fofa_query(
             result = await adapter.execute(action, context)
             if result.status != "completed":
                 batches.fail(batch_id, result.error or result.status)
-                return FofaRunResult(result.status, observations, page - 1, cost, batch_id, result.error)
+                return FofaRunResult(result.status, observations, page - 1, cost, batch_id, error=result.error)
             observations += len(result.observations)
             _store_fofa_observations(db, task_id, result)
             cost += result.cost_units
+            consumed_fpoints = result.consumed_fpoints
+            required_fpoints = result.required_fpoints
             token = result.next_token
             batches.complete(
                 batch_id,
@@ -98,22 +104,25 @@ async def run_fofa_query(
                 next_token=token,
                 cost_units=cost,
                 result_count=observations,
-                estimated_fpoints=result.cost_units,
-                consumed_fpoints=result.cost_units,
+                estimated_fpoints=required_fpoints or 0,
+                consumed_fpoints=consumed_fpoints or 0,
                 finished=not result.has_more,
             )
             if not result.has_more:
-                return FofaRunResult("completed", observations, page, cost, batch_id)
+                return FofaRunResult(
+                    "completed", observations, page, cost, batch_id,
+                    consumed_fpoints, required_fpoints,
+                )
             if not token:
                 batches.fail(batch_id, "missing_next_token")
-                return FofaRunResult("failed", observations, page, cost, batch_id, "missing_next_token")
+                return FofaRunResult("failed", observations, page, cost, batch_id, error="missing_next_token")
             batches.save_cursor(batch_id, task_id, fingerprint, token, page + 1, result.request_id)
             page += 1
         batches.fail(batch_id, "max_pages_exceeded")
-        return FofaRunResult("partial", observations, page - 1, cost, batch_id, "max_pages_exceeded")
+        return FofaRunResult("partial", observations, page - 1, cost, batch_id, error="max_pages_exceeded")
     except Exception as exc:
         batches.fail(batch_id, type(exc).__name__)
-        return FofaRunResult("failed", observations, page - 1, cost, batch_id, type(exc).__name__)
+        return FofaRunResult("failed", observations, page - 1, cost, batch_id, error=type(exc).__name__)
 
 
 async def run_fofa_query_batches(
@@ -161,5 +170,7 @@ async def run_fofa_operation(
         1,
         result.cost_units,
         f"fofa-operation-{uuid.uuid4().hex[:16]}",
-        result.error,
+        consumed_fpoints=result.consumed_fpoints,
+        required_fpoints=result.required_fpoints,
+        error=result.error,
     )

@@ -6,3 +6,4 @@ task.sqlite
 task.sqlite-*
 reports/
 evidence/
+runtime/

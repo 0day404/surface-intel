@@ -62,6 +62,8 @@ class AdapterResult:
     next_token: str | None = None
     has_more: bool = False
     cost_units: int = 0
+    consumed_fpoints: int | None = None
+    required_fpoints: int | None = None
     request_id: str | None = None
     error: str | None = None
 

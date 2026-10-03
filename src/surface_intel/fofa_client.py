@@ -107,16 +107,17 @@ class StdioJsonRpcTransport:
     async def close(self) -> None:
         if self.process is None:
             return
-        if self.process.stdin is not None:
-            self.process.stdin.close()
-        if self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), self.timeout)
-            except asyncio.TimeoutError:
-                self.process.kill()
-                await self.process.wait()
+        process = self.process
         self.process = None
+        if process.stdin is not None:
+            process.stdin.close()
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.communicate(), self.timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
 
 
 @dataclass

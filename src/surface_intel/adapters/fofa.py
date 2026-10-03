@@ -53,23 +53,36 @@ class FofaMcpAdapter:
     async def execute(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
         tool = str(action.get("tool") or ("fofa_search_next" if action.get("next_token") else "fofa_search"))
         payload = await self._call(tool, action)
-        if payload.get("error") and payload.get("status") in {"failed", "error"}:
+        error = payload.get("error")
+        if isinstance(error, dict):
+            error = error.get("message") or error.get("type") or str(error)
+        if payload.get("error") and (
+            payload.get("status") in {"failed", "error"} or payload.get("ok") is False
+        ):
             return AdapterResult(
                 "failed",
                 request_id=payload.get("request_id"),
-                error=str(payload["error"]),
+                error=str(error),
             )
-        observations = payload.get("observations", payload.get("results", []))
+        observations = payload.get("observations", payload.get("results", payload.get("data", [])))
+        pagination = payload.get("pagination") or {}
+        collection = payload.get("collection") or {}
+        cost = payload.get("cost") or {}
+        status = payload.get("status")
+        if status is None:
+            status = "completed" if payload.get("ok") is True else "failed"
         if tool in {"fofa_health", "fofa_account_info", "fofa_stats", "fofa_host"} and not observations:
             observations = [payload]
         return AdapterResult(
-            payload.get("status", "failed"),
+            status,
             observations=observations,
-            next_token=payload.get("next_token"),
-            has_more=bool(payload.get("has_more")),
+            next_token=payload.get("next_token") or pagination.get("next_token"),
+            has_more=bool(payload.get("has_more", collection.get("has_more"))),
             cost_units=int(payload.get("cost_units", 0)),
+            consumed_fpoints=cost.get("consumed_fpoint"),
+            required_fpoints=cost.get("required_fpoints"),
             request_id=payload.get("request_id"),
-            error=payload.get("error"),
+            error=str(error) if error else None,
             evidence_refs=[str(payload.get("consumed_fpoint"))] if payload.get("consumed_fpoint") is not None else [],
         )
 

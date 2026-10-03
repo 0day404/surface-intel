@@ -209,6 +209,8 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
         "observations": result.observations,
         "pages": result.pages,
         "batch_id": result.batch_id,
+        "consumed_fpoints": result.consumed_fpoints,
+        "required_fpoints": result.required_fpoints,
         "cost_units": result.cost_units,
         "error": result.error,
     }, ensure_ascii=True))

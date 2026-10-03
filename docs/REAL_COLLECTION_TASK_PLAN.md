@@ -182,9 +182,15 @@ stats/host/account 操作的 evidence-only 记录。执行了
 `uv run surface-intel fofa-health --real`，外部 `fofa-mcp` stdio 进程成功返回
 健康配置结果；该工具不发起远程 FOFA 搜索。全套测试为 `46 passed`。
 
-真实搜索 smoke test 未执行：当前没有由用户指定的授权任务和授权域名，不能
-猜测目标或把任意域名作为真实查询对象。下一次真实 smoke test 必须使用已确认
-scope、明确域名、独立预算和受控凭据环境。
+真实搜索 smoke test 已在用户明确授权的
+`www.ceramtec-group.cn` 上执行。任务
+`task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
+返回 2 条观察、1 页结果；生成 JSON/XLSX 报告。未执行目标直连、端口扫描、
+浏览器观察或其他主动探测。
+
+该 smoke test 暴露并修复了真实 MCP 响应格式适配问题：FOFA 成功结果使用
+`ok/data/pagination/cost`，适配器现已正确转换为观察、分页和 F 点字段。
+修复后全套测试为 `47 passed`。历史失败批次保留为 failed，不被重放或覆盖。
 
 ## R2：FOFA 生产闭环
 
