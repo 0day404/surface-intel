@@ -41,7 +41,10 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
         scope_version=scope_row["scope_version"],
         scope_confirmed=True,
         active_level="passive_only",
-        metadata={"authorized_domains": json.loads(scope_row["payload_json"]).get("authorized_domains", [])},
+        metadata={
+            "authorized_domains": json.loads(scope_row["payload_json"]).get("authorized_domains", []),
+            "scope_payload": json.loads(scope_row["payload_json"]),
+        },
     )
     observations = 0
     assets = 0

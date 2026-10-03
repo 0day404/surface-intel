@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class Database:
@@ -126,6 +126,16 @@ class Database:
                     started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     completed_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS budget (
+                    budget_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    kind TEXT NOT NULL,
+                    limit_units INTEGER NOT NULL,
+                    reserved_units INTEGER NOT NULL DEFAULT 0,
+                    consumed_units INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(task_id, kind)
+                );
                 CREATE TABLE IF NOT EXISTS subtask (
                     subtask_id TEXT PRIMARY KEY,
                     parent_task_id TEXT NOT NULL REFERENCES task(task_id),
@@ -186,6 +196,7 @@ class Database:
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (2)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (3)")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (4)")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (5)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

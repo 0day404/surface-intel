@@ -9,6 +9,8 @@ from typing import Any
 from .adapters.base import Adapter, AdapterManifest, AdapterResult, TaskContext
 from .adapters.capabilities import CapabilityRegistry
 from .redaction import redact
+from .policy.scope import Scope
+from .state.budget import BudgetRepository
 from .state.database import Database
 from .states import ActionStatus, CapabilityStatus
 
@@ -43,6 +45,10 @@ class ExecutionContext:
         self.budget["cost_units"] = remaining - units
         return True
 
+    def scope(self) -> Scope | None:
+        payload = self.metadata.get("scope_payload")
+        return Scope.from_dict(payload) if isinstance(payload, dict) else None
+
 
 def classify_error(error: str | None) -> str | None:
     if not error:
@@ -71,6 +77,7 @@ class AdapterExecutor:
     def __init__(self, db: Database, registry: CapabilityRegistry):
         self.db = db
         self.registry = registry
+        self.budgets = BudgetRepository(db)
 
     async def execute(
         self,
@@ -89,6 +96,18 @@ class AdapterExecutor:
                 return self._finish(call_id, validation, AdapterResult(ActionStatus.BLOCKED.value, error="stop_requested"))
             if not context.scope_confirmed:
                 return self._finish(call_id, validation, AdapterResult(ActionStatus.BLOCKED.value, error="scope_not_confirmed"))
+            scope = context.scope()
+            target = str(action.get("target", "")).strip()
+            if scope is not None:
+                if context.scope_version != scope.scope_version:
+                    return self._finish(call_id, validation, AdapterResult(ActionStatus.BLOCKED.value, error="scope_version_mismatch"))
+                if target:
+                    allowed, reason = scope.is_action_allowed(
+                        target=target,
+                        active=manifest.required_active_level != "passive_only",
+                    )
+                    if not allowed:
+                        return self._finish(call_id, validation, AdapterResult(ActionStatus.BLOCKED.value, error=reason))
             if manifest.capability_status != CapabilityStatus.AVAILABLE.value:
                 return self._finish(
                     call_id,
@@ -107,9 +126,17 @@ class AdapterExecutor:
             validation = await adapter.validate(action, context.as_task_context())
             if validation.status != ActionStatus.COMPLETED.value:
                 return self._finish(call_id, validation, validation)
-            if not context.reserve_cost(manifest.cost_units):
+            budget_kind = str(action.get("budget_kind", manifest.name))
+            db_reserved = next(self.db.rows(
+                "SELECT 1 FROM budget WHERE task_id=? AND kind=?",
+                (context.task_id, budget_kind),
+            ), None) is not None
+            reserved = self.budgets.reserve(context.task_id, budget_kind, manifest.cost_units) if db_reserved else context.reserve_cost(manifest.cost_units)
+            if not reserved:
                 return self._finish(call_id, validation, AdapterResult(ActionStatus.BLOCKED.value, error="budget_exhausted"))
             result = await adapter.execute(action, context.as_task_context())
+            if db_reserved:
+                self.budgets.commit(context.task_id, budget_kind, manifest.cost_units)
             if result.cost_units > manifest.cost_units and not context.reserve_cost(result.cost_units - manifest.cost_units):
                 result = AdapterResult(ActionStatus.PARTIAL.value, observations=result.observations, error="budget_exhausted",
                                        request_id=result.request_id)

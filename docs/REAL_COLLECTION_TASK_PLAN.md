@@ -138,7 +138,7 @@ MCP、Playwright MCP，未访问真实目标，未执行主动探测，`fofa-mcp
       request id、开始/结束时间、状态、重试次数、脱敏输入摘要和错误分类。
 - [x] 将 `run_offline_task` 重构为可注入 adapter registry 的通用 runner；
       Mock 只作为 registry 中的一种实现。
-- [ ] 所有 adapter 调用前执行 `validate`、`check_budget`、`check_time_window`、
+- [x] 所有 adapter 调用前执行 `validate`、`check_budget`、`check_time_window`、
       `is_target_in_scope`、`is_action_allowed` 和 capability check。
 - [x] 外部失败分类为 `timeout`、`rate_limited`、`auth_unavailable`、
       `dependency_unavailable`、`invalid_input`、`remote_error`、
@@ -149,7 +149,7 @@ MCP、Playwright MCP，未访问真实目标，未执行主动探测，`fofa-mcp
 - [x] 同一 idempotency key 只能产生一次外部动作。
 - [x] action 在 `started` 后崩溃恢复为 `unknown`，不得直接再次执行。
 - [x] adapter 返回敏感字段时，普通日志和报告均不可见。
-- [ ] 预算耗尽、时间窗关闭、范围版本变化和 adapter 能力不足都在外部调用
+- [x] 预算耗尽、时间窗关闭、范围版本变化和 adapter 能力不足都在外部调用
       前阻止执行。
 
 **R1 第一增量实际验证**：schema migration version 4、`adapter_call` 审计表、
@@ -157,9 +157,12 @@ MCP、Playwright MCP，未访问真实目标，未执行主动探测，`fofa-mcp
 `AdapterExecutor` 已接入离线 Coordinator。`uv run pytest -q` 结果为
 `32 passed`。
 
-**R1 尚未完成**：时间窗口、目标级范围检查、事务性预算 reservation、重试/
-退避、真实 MCP transport 和完整模式调度仍待后续增量；因此当前仍只能声明
-离线/受控执行器能力，不能声明真实数据源生产可用。
+**R1 收口实际验证**：统一执行器现已读取 scope payload，执行目标范围、scope
+version 和时间窗口门控；新增 SQLite `budget` 表及事务性 reserve/commit/release，
+并发预算超卖会被拒绝。`uv run pytest -q` 结果为 `35 passed`。
+
+**R1 尚未完成**：重试/退避、真实 MCP transport 和完整模式调度仍待后续增量；
+因此当前仍只能声明离线/受控执行器能力，不能声明真实数据源生产可用。
 
 ## R2：FOFA 生产闭环
 
