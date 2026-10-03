@@ -63,9 +63,9 @@ def test_report_includes_merge_assets_relations_and_conflicts(tmp_path):
 
     # XLSX: dedicated sheets mirror the JSON sections
     workbook = load_workbook(output_dir / "result.xlsx")
-    assert "资产关系" in workbook.sheetnames
+    assert "架构关系" in workbook.sheetnames
     assert "归并冲突" in workbook.sheetnames
-    relations_rows = list(workbook["资产关系"].iter_rows(values_only=True))
+    relations_rows = list(workbook["架构关系"].iter_rows(values_only=True))
     assert relations_rows[0][0] == "relation_id"
     assert len(relations_rows) - 1 == len(report["asset_relations"])
     conflicts_rows = list(workbook["归并冲突"].iter_rows(values_only=True))

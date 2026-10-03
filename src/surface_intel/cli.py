@@ -650,6 +650,34 @@ def cmd_browser_observe(args: argparse.Namespace) -> int:
     return 0 if result.status == "completed" else 2
 
 
+def cmd_baseline_save(args: argparse.Namespace) -> int:
+    from surface_intel.monitor import save_baseline
+
+    db = Database(_config(args).database_path)
+    task = next(db.rows("SELECT scope_version FROM task WHERE task_id=?", (args.task_id,)), None)
+    if task is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    checkpoint_id = save_baseline(db, args.task_id, task["scope_version"])
+    print(json.dumps({"ok": True, "task_id": args.task_id, "checkpoint_id": checkpoint_id}))
+    return 0
+
+
+def cmd_baseline_diff(args: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from surface_intel.monitor import diff_against_baseline
+
+    db = Database(_config(args).database_path)
+    task = next(db.rows("SELECT scope_version FROM task WHERE task_id=?", (args.task_id,)), None)
+    if task is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    diff = diff_against_baseline(db, args.task_id, task["scope_version"])
+    print(json.dumps({"ok": True, **asdict(diff)}, ensure_ascii=True))
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
@@ -657,7 +685,8 @@ def cmd_report(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2
-    print(json.dumps({"ok": True, "integrity_status": report["integrity_status"], "export": report["export"]}, ensure_ascii=True))
+    print(json.dumps({"ok": True, "integrity_status": report["integrity_status"],
+                      "summary": report["summary"], "export": report["export"]}, ensure_ascii=True))
     return 0
 
 
@@ -700,7 +729,7 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("baseline-save", cmd_baseline_save), ("baseline-diff", cmd_baseline_diff), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -761,7 +790,7 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--max-requests", type=int, default=100)
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
-        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge"}:
+        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")

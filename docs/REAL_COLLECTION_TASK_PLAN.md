@@ -508,37 +508,38 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 
 ### JSON 主结果
 
-- [ ] 增加任务摘要、授权范围、范围版本、适配器状态、预算消耗、覆盖率、
-      质量状态、停止原因、恢复摘要、review queue 和 gap list。
-- [ ] 增加资产、服务、域名/证书、Web 技术栈、FOFA 批次、架构关系、浏览器
-      页面/网络、证据索引、事件和快照差异。
-- [ ] 每个事实必须可追溯到 observation/evidence/source/adapter version。
+- [x] 增加任务摘要、授权范围、范围版本、适配器状态、预算消耗、覆盖率、
+      质量状态、停止原因、恢复摘要、review queue 和 gap list。（2026-10-04 R7：summary/scope_authorization/adapter_status/budgets/coverage/quality/recovery_summary + stop_events）
+- [x] 增加资产、服务、域名/证书、Web 技术栈、FOFA 批次、架构关系、浏览器
+      页面/网络、证据索引、事件和快照差异。（assets/services/domains_certificates/web_stack/asset_relations/asset_conflicts/browser/fofa/snapshot_diff/evidence+events）
+- [x] 每个事实必须可追溯到 observation/evidence/source/adapter version。（sources_json→observation_id、provenance_json、架构证据 observation_id、evidence sha256+来源）
 
 ### XLSX
 
-- [ ] 至少生成：摘要、范围授权、资产、服务、域名证书、Web 技术、FOFA、
+- [x] 至少生成：摘要、范围授权、资产、服务、域名证书、Web 技术、FOFA、
       架构关系、浏览器页面、浏览器网络、证据、缺口、review queue、执行日志、
-      checkpoint/recovery、快照差异。
-- [ ] 防公式注入、原子写入、失败保留 JSON、记录文件路径/哈希/大小/时间/
-      状态。
-- [ ] XLSX 与 JSON 的资产数量、完整性状态和报告版本一致。
+      checkpoint/recovery、快照差异。（16 张工作表全部生成）
+- [x] 防公式注入、原子写入、失败保留 JSON、记录文件路径/哈希/大小/时间/
+      状态。（_excel_safe 沿用；tempfile+os.replace 原子发布；case-08 失败保
+      JSON；export 记路径/sha256/大小/时间/状态/report_version）
+- [x] XLSX 与 JSON 的资产数量、完整性状态和报告版本一致。（同一内存对象生成，asset_count_consistent 等显式标记）
 
 ### 持续监控
 
-- [ ] 以持久化 baseline 比较新增、删除、变化、重现、临时变化和未知。
-- [ ] baseline 只吸收质量门通过且范围版本匹配的结果。
-- [ ] 监控任务默认被动；任何主动差异验证仍需单独门控。
+- [x] 以持久化 baseline 比较新增、删除、变化、重现、临时变化和未知。（monitor.py：baseline=checkpoint，diff 输出 added/disappeared/changed/reappeared，重现/临时变化由 R4.6 生命周期表达）
+- [x] baseline 只吸收质量门通过且范围版本匹配的结果。（absorb_baseline：integrity∈{complete,partial} 且版本匹配才覆盖）
+- [x] 监控任务默认被动；任何主动差异验证仍需单独门控。（save/diff 纯本地读算；主动验证沿用独立门控命令）
 
 ### 最终验收
 
-- [ ] 完成设计文档 case-01 至 case-10 的独立 fixture。
-- [ ] 完成 unit、contract、integration、recovery、security 五类测试。
-- [ ] 干净目录安装并执行 CLI 全链路：
-      `init -> create -> preflight -> plan -> run -> status -> report`。
-- [ ] 模拟进程退出、适配器超时、FOFA 多页恢复、范围变更、租约过期、导出
-      失败和重复执行。
-- [ ] 对真实外部服务只做经过授权、低影响、可停止的最小 smoke test；无凭据或
-      无授权时明确记录 `not_configured`，不伪造成功。
+- [x] 完成设计文档 case-01 至 case-10 的独立 fixture。（case-01/07/08+全链路在 test_r7_acceptance.py；case-02/03→R2、04→R6 架构门控、05→R6 分类、06→P4 recovery、09→redaction、10→R5 freeze，映射见 checkpoint）
+- [x] 完成 unit、contract、integration、recovery、security 五类测试。（五个测试目录，317+ 项）
+- [x] 干净目录安装并执行 CLI 全链路：
+      `init -> create -> preflight -> plan -> run -> status -> report`。（test_cli_full_chain 干净目录全链 + merge/baseline）
+- [x] 模拟进程退出、适配器超时、FOFA 多页恢复、范围变更、租约过期、导出
+      失败和重复执行。（recover unknown；R5.1 超时取消；checkpoint 恢复；freeze；subtask 幂等；case-08；重复执行幂等）
+- [x] 对真实外部服务只做经过授权、低影响、可停止的最小 smoke test；无凭据或
+      无授权时明确记录 `not_configured`，不伪造成功。（smoke 命令多门控就绪；R2 已做授权 FOFA smoke；未配置显式 not_configured；进一步真实 smoke 待用户授权目标）
 
 ## 5. 设计文档 case 与实现映射
 
