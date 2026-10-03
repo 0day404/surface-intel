@@ -90,30 +90,39 @@ R7 决定是否可以对外交付。不得跳过 R4 直接扩大主动探测，�
 **目标**：把当前未提交修改、现有状态和真实能力边界固定下来，避免后续在
 Mock 路径上继续扩展而掩盖生产缺口。
 
+**状态**：已完成（2026-10-03，提交 `a193e6c`，checkpoint
+`docs/checkpoints/R0-2026-10-03.md`）。
+
 ### 工作项
 
-- [ ] 提交或明确保留当前报告质量门、重复运行保护和验收矩阵修改。
-- [ ] 为 `run_offline_task`、`FofaMcpAdapter`、`PlaywrightAdapter`、报告导出
+- [x] 提交或明确保留当前报告质量门、重复运行保护和验收矩阵修改。
+- [x] 为 `run_offline_task`、`FofaMcpAdapter`、`PlaywrightAdapter`、报告导出
       和恢复代码建立当前行为快照测试。
-- [ ] 增加 `capability_status` 枚举：`available`、`degraded`、
+- [x] 增加 `capability_status` 枚举：`available`、`degraded`、
       `not_configured`、`unsupported`、`failed`。
-- [ ] 为每个适配器冻结 manifest schema：能力、主动等级、成本、分页、恢复、
+- [x] 为每个适配器冻结 manifest schema：能力、主动等级、成本、分页、恢复、
       取消、重试、敏感数据策略、外部副作用和版本。
-- [ ] 把 README、ADAPTERS、OPERATIONS、SCHEMA、SECURITY 中的“已实现”“仅接口”
+- [x] 把 README、ADAPTERS、OPERATIONS、SCHEMA、SECURITY 中的“已实现”“仅接口”
       “Mock”“not_configured”分开陈述。
-- [ ] 建立 `docs/coverage-matrix.md` 的机器可校验版本，逐项映射设计文档
+- [x] 建立 `docs/coverage-matrix.md` 的机器可校验版本，逐项映射设计文档
       S-00 至 S-18、代码入口和测试入口。
 
 ### 验收
 
-- 干净目录执行 `uv sync --extra dev && uv run pytest` 成功。
-- 不启动外部服务即可重现所有现有测试。
-- 任何文档或报告都不会声称真实 FOFA、Playwright、DNS、CT 或 RDAP 已可用。
+- [x] 干净目录执行 `uv sync --extra dev && uv run pytest` 成功。
+- [x] 不启动外部服务即可重现所有现有测试。
+- [x] 任何文档或报告都不会声称真实 FOFA、Playwright、DNS、CT 或 RDAP 已可用。
+
+**R0 实际验证**：`uv run pytest -q` 结果为 `28 passed`；未启动真实 FOFA
+MCP、Playwright MCP，未访问真实目标，未执行主动探测，`fofa-mcp` 未修改。
 
 ## R1：真实适配器运行时和统一执行器
 
 **目标**：消除真实适配器与离线 Coordinator 之间的断层，所有适配器都通过
 持久化动作运行。
+
+**状态**：待开始。进入条件：R0 checkpoint 已保存，能力状态契约、覆盖矩阵和
+离线测试基线已冻结。
 
 ### 代码和数据任务
 
@@ -453,4 +462,3 @@ uv run surface-intel report <task-id> --format all
 > `surface-intel` 支持授权边界内、可审计、可恢复的离线和受控真实信息收集；
 > 真实数据覆盖率、主动观察和多源交叉验证仍受已配置适配器、授权、预算和
 > 外部服务状态限制。
-
