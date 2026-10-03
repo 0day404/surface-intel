@@ -30,10 +30,10 @@ def persist_actions(db: Database, task_id: str, scope: Scope, plan: list[dict[st
             key = f"{task_id}:{item['fingerprint']}:passive"
             cursor = connection.execute(
                 """INSERT OR IGNORE INTO action
-                   (action_id,task_id,idempotency_key,adapter,status,scope_version)
-                   VALUES(?,?,?,?,?,?)""",
+                   (action_id,task_id,idempotency_key,adapter,status,scope_version,attempt)
+                   VALUES(?,?,?,?,?,?,?)""",
                 (f"action-{uuid.uuid4().hex[:16]}", task_id, key, "mock_passive",
-                 ActionStatus.PLANNED.value, scope.scope_version),
+                 ActionStatus.PLANNED.value, scope.scope_version, 0),
             )
             inserted += cursor.rowcount
     return inserted

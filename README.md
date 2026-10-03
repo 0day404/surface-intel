@@ -6,6 +6,7 @@
 - `init`、`create`、`preflight`、`plan`、`run`、`status`、`validate`、`report`；
 - 范围标准化、排除项优先、动作幂等、Mock 被动/FOFA 多页适配器；
 - SQLite 观察/证据/资产/缺口索引，以及可重建 JSON/XLSX。
+- P4 安全主动门控、能力矩阵、Safe HTTP/Port 适配器和 P5 checkpoint/崩溃恢复。
 
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`

@@ -9,6 +9,7 @@ from .adapters.base import TaskContext
 from .adapters.mock import MockFofaAdapter, MockPassiveAdapter
 from .normalization import normalize_target
 from .state.database import Database
+from .state.recovery import create_checkpoint
 from .states import ActionStatus, TaskStatus
 
 
@@ -28,6 +29,11 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
         connection.execute("UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (TaskStatus.COLLECTING_PASSIVE.value, task_id))
     actions = list(db.rows("SELECT * FROM action WHERE task_id=? AND status=?", (task_id, ActionStatus.PLANNED.value)))
     for action in actions:
+        with db.connect() as connection:
+            connection.execute(
+                "UPDATE action SET status=?, started_at=CURRENT_TIMESTAMP, attempt=attempt+1, updated_at=CURRENT_TIMESTAMP WHERE action_id=? AND status=?",
+                (ActionStatus.STARTED.value, action["action_id"], ActionStatus.PLANNED.value),
+            )
         result = await passive.execute({"target": action["idempotency_key"]}, context)
         with db.connect() as connection:
             for item in result.observations:
@@ -35,6 +41,12 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
                 observations += 1
             connection.execute("UPDATE action SET status=?, result_ref=?, updated_at=CURRENT_TIMESTAMP WHERE action_id=?",
                                (result.status, result.request_id, action["action_id"]))
+        create_checkpoint(
+            db,
+            task_id,
+            phase="collecting_passive",
+            payload={"last_action_id": action["action_id"], "observations": observations, "assets": assets},
+        )
     fofa_result = await fofa.execute({"query": "offline-fixture", "page": 1}, context)
     while True:
         with db.connect() as connection:
@@ -55,6 +67,12 @@ async def run_offline_task(db: Database, task_id: str, fofa_pages: list[dict] | 
         connection.execute("INSERT INTO gap(gap_id,task_id,priority,reason) VALUES(?,?,?,?)",
                            (f"gap-{uuid.uuid4().hex[:16]}", task_id, "medium", "active_observation_not_authorized"))
         connection.execute("UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?", (TaskStatus.CORRELATING.value, task_id))
+    create_checkpoint(
+        db,
+        task_id,
+        phase="correlating",
+        payload={"observations": observations, "assets": assets, "fofa_pages": len(fofa.calls)},
+    )
     return {"task_id": task_id, "observations": observations, "assets": assets}
 
 

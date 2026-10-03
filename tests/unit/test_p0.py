@@ -9,7 +9,7 @@ def test_init_and_health(tmp_path):
     assert main(["init", str(tmp_path)]) == 0
     health = Database(tmp_path / "task.sqlite").health()
     assert health["ok"] is True
-    assert health["schema_version"] == 1
+    assert health["schema_version"] == 2
 
 
 def test_unconfirmed_scope_is_rejected(tmp_path, capsys):

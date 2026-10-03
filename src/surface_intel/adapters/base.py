@@ -15,6 +15,8 @@ class AdapterManifest:
     supports_resume: bool = False
     supports_cancellation: bool = False
     external_side_effects: bool = False
+    retry_policy: str = "none"
+    sensitive_data_policy: str = "redact_and_reject"
 
 
 @dataclass
@@ -22,6 +24,14 @@ class TaskContext:
     task_id: str
     scope_version: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def scope_confirmed(self) -> bool:
+        return bool(self.metadata.get("scope_confirmed", False))
+
+    @property
+    def active_level(self) -> str:
+        return str(self.metadata.get("active_level", "passive_only"))
 
 
 @dataclass

@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -105,9 +105,26 @@ class Database:
                     reason TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'open'
                 );
+                CREATE TABLE IF NOT EXISTS adapter_registry (
+                    adapter_name TEXT PRIMARY KEY,
+                    version TEXT NOT NULL,
+                    manifest_json TEXT NOT NULL,
+                    health_status TEXT NOT NULL DEFAULT 'unknown',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 INSERT OR IGNORE INTO schema_version(version) VALUES (1);
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(action)").fetchall()}
+            for name, definition in (
+                ("attempt", "INTEGER NOT NULL DEFAULT 0"),
+                ("started_at", "TEXT"),
+                ("completed_at", "TEXT"),
+                ("error_code", "TEXT"),
+            ):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE action ADD COLUMN {name} {definition}")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (2)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

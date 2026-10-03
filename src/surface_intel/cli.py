@@ -16,6 +16,7 @@ from .planning import build_passive_plan, persist_actions, serialize_plan
 from .policy.scope import Scope
 from .state.database import Database
 from .reporting.export import build_report
+from .state.recovery import create_checkpoint, latest_checkpoint, recover_started_actions, set_task_status
 from .states import TaskStatus
 
 
@@ -37,7 +38,11 @@ def cmd_create(args: argparse.Namespace) -> int:
     db = Database(config.database_path)
     db.initialize()
     task_id = f"task-{uuid.uuid4().hex[:16]}"
-    scope = json.loads(Path(args.scope).read_text(encoding="utf-8"))
+    try:
+        scope = json.loads(Path(args.scope).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(json.dumps({"ok": False, "error": "invalid_scope_file", "detail": type(exc).__name__}))
+        return 2
     confirmed = bool(scope.get("confirmed", False))
     if not scope.get("authorized_targets") and not scope.get("authorized_domains") and not scope.get("authorized_ips"):
         print(json.dumps({"ok": False, "error": "scope_has_no_authorized_target"}))
@@ -151,10 +156,46 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_checkpoint(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    if next(db.rows("SELECT task_id FROM task WHERE task_id=?", (args.task_id,)), None) is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    checkpoint_id = create_checkpoint(
+        db,
+        args.task_id,
+        phase=args.phase,
+        payload={"reason": args.reason, "manual": True},
+    )
+    print(json.dumps({"ok": True, "checkpoint_id": checkpoint_id}))
+    return 0
+
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    db = Database(_config(args).database_path)
+    if next(db.rows("SELECT task_id FROM task WHERE task_id=?", (args.task_id,)), None) is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    recovered = recover_started_actions(db, args.task_id)
+    checkpoint = latest_checkpoint(db, args.task_id)
+    print(json.dumps({"ok": True, "recovered_actions": recovered, "checkpoint": checkpoint}, ensure_ascii=True))
+    return 0
+
+
+def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
+    db = Database(_config(args).database_path)
+    if next(db.rows("SELECT task_id FROM task WHERE task_id=?", (args.task_id,)), None) is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    set_task_status(db, args.task_id, status, args.reason)
+    print(json.dumps({"ok": True, "task_id": args.task_id, "status": status.value}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("report", cmd_report), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -164,8 +205,13 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "create":
             command.add_argument("--input", required=False)
             command.add_argument("--scope", required=True)
-        if name in {"status", "validate", "preflight", "plan", "run", "report"}:
+        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel"}:
             command.add_argument("task_id")
+        if name == "checkpoint":
+            command.add_argument("--phase", default="manual")
+            command.add_argument("--reason", default="")
+        if name in {"pause", "cancel"}:
+            command.add_argument("--reason", default="")
     return parser
 
 
