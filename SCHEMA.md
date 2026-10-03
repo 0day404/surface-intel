@@ -38,6 +38,18 @@ R3.2 同样无 migration 变化：CT 观察复用 `evidence`/`observation`（sou
 `related_scope_status`（`candidate`/`needs_review`/`not_applicable`——CT 匹配
 单独绝不产生 `confirmed`）。
 
+R3.3 同样无 migration 变化：RDAP 观察复用 `evidence`/`observation`（source 为
+`rdap_lookup`），执行审计复用 `adapter_call`，预算复用 `budget` 表的
+`rdap_lookup` kind。观察 payload 额外携带 `target`、`target_kind`（domain/ip/
+asn）、`record`（`handle`、`name`、`country`、`organizations`、`registrar`、
+`abuse_contacts`、`events`、`cidrs`、`ip_version`、`start_address`、
+`end_address`、`asn_start`、`asn_end`、`statuses`、`nameservers`，WHOIS 回退时
+另含 `data_quality=whois_fallback`）、`source_protocol`、`queried_at`、
+`query_ms`、`source_quality`（`direct`/`whois_fallback`）、`license_status`
+（`public_rdap`/`whois_text_unverified`）、`scope_version`、`observed_at` 和
+`related_scope_status`（`candidate`/`not_applicable`——注册数据绝不产生
+`confirmed`）。
+
 后续批次增加
 `plan`、`asset`、`evidence`、`observation`、`gap`、`budget`、`adapter_registry`、
 `review_item`、`subtask` 和 `agent_lease`，并通过迁移演进。

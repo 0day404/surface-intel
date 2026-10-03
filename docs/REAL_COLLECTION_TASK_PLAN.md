@@ -202,6 +202,20 @@ fetch、percent-encoded 查询、429→rate_limited、超时/坏响应结构化�
 `ct-health --real` 与 `ct-search --real --confirm-real`。全套测试 `110 passed`；
 本增量只使用 fixture fetch，未对 crt.sh 或任何真实目标发起网络请求。
 
+**R3.3 第一增量实际验证**：新增 `RdapAdapter`（`rdap_lookup` 1.0，目标种类
+白名单 domain/ip/asn，注入式 lookup client，规范化保存注册组织/registrar/
+abuse 联系/事件时间/CIDR/ASN 区间/country/nameservers）、真实
+`SequentialLookupClient`（rdap.org bootstrap、404/429/超时/坏响应结构化映射、
+`SURFACE_INTEL_RDAP_ENDPOINT` 端点覆盖）+ `WhoisFallbackClient`（端口 43、
+IANA 首查至多一次 referral、白名单字段提取、绝不挖掘联系人地址、强制
+`whois_fallback` 数据质量标记）和 `run_rdap_lookup`（runner 级 scope 门控在
+client 调用之前 + 统一执行器单动作 + `adapter_call` 审计 + `rdap_lookup`
+预算）。注册数据一律 `candidate` 归属：组织名或 ASN 相同绝不确认资产；ASN
+直查在 R4 提供绑定依据前被 `asn_scope_binding_deferred` 拒绝；RDAP 记录中的
+更宽 CIDR 不扩大授权范围。CLI 增加 `rdap-health --real` 与
+`rdap-lookup --real --confirm-real`。全套测试 `145 passed`；本增量全部使用
+fixture/注入 transport，未发起任何真实网络请求。
+
 真实搜索 smoke test 已在用户明确授权的
 `www.ceramtec-group.cn` 上执行。任务
 `task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
@@ -278,8 +292,9 @@ fetch、percent-encoded 查询、429→rate_limited、超时/坏响应结构化�
 - [x] `CertificateTransparencyAdapter`：证书 CN/SAN、issuer、serial、validity、
       log source、首次/最后观察；域名关系先标记 candidate，不能仅凭证书确认
       资产归属。（2026-10-03 R3.2 第一增量）
-- [ ] `RdapAdapter`：注册组织、网络、ASN、CIDR、abuse 联系信息和查询时间；
-      WHOIS fallback 必须明确数据质量和许可状态。
+- [x] `RdapAdapter`：注册组织、网络、ASN、CIDR、abuse 联系信息和查询时间；
+      WHOIS fallback 必须明确数据质量和许可状态。（2026-10-03 R3.3 第一增量；
+      ASN 数据结构已支持，直查门控待 R4 绑定）
 - [ ] 所有适配器输出统一 observation、evidence metadata 和 source quality，
       不把原始敏感响应直接放入普通日志。
 

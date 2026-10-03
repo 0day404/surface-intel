@@ -32,3 +32,12 @@ serial/validity/first_seen/last_seen），原始响应体不落盘。默认端�
 `https://crt.sh/`，可用 `SURFACE_INTEL_CT_ENDPOINT` 覆盖；请求超时默认 30 秒
 （crt.sh 慢查询常见），`rate_limited`/`http_error` 属基础设施失败，重跑是合法
 重新观察。
+
+R3.3 增加被动注册数据入口：`rdap-health --real` 只报告端点配置，不发起网络请求；
+`rdap-lookup` 要求 `--real --confirm-real`、已确认范围且目标在范围内（IP 需在
+授权 IP 列表或 CIDR 内）。运行把任务置为 `collecting_passive`，单动作经统一执行
+器执行（`adapter_call` 审计 + `rdap_lookup` 预算），结果以
+`completed`/`failed`/`blocked` 收口。默认端点 `https://rdap.org/`，可用
+`SURFACE_INTEL_RDAP_ENDPOINT` 覆盖；TLD 无 RDAP 时自动回退 WHOIS（端口 43，
+`whois_text_unverified` 许可标记）。ASN 直查被 `asn_scope_binding_deferred` 拒绝
+（R4 归并层提供绑定依据后放开）；重复执行是合法重新观察。

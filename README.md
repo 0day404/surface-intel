@@ -55,6 +55,20 @@ uv run surface-intel ct-search --task-root .\task <task-id> --domain example.com
 证书 SAN 只产生 `candidate` 关系，任何第三方或范围外域名都会把观察升级为
 `needs_review`；CT 匹配单独绝不确认资产归属。
 
+R3.3 起真实被动注册数据入口同样显式受控：
+
+```powershell
+uv run surface-intel rdap-health --real
+uv run surface-intel rdap-lookup --task-root .\task <task-id> --target 203.0.113.5 --kind ip --real --confirm-real
+```
+
+`rdap-lookup` 经 rdap.org（`SURFACE_INTEL_RDAP_ENDPOINT` 可覆盖）查询授权域名或
+IP 的注册组织、网络、CIDR、abuse 联系和事件时间；TLD 无 RDAP 服务时回退
+WHOIS（端口 43，只提取白名单字段），回退结果明确标记
+`whois_fallback`/`whois_text_unverified`。注册数据只能产生 `candidate` 归属
+关系——组织名或 ASN 相同绝不确认资产归属；ASN 直查在 R4 归并层提供绑定依据前
+被拒绝。
+
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`
 命令；不会访问真实目标、FOFA 或 Playwright。

@@ -40,3 +40,17 @@ SAN 只产生候选关系：所有名称都在授权范围内时观察仍为 `ca
 API，`SURFACE_INTEL_CT_ENDPOINT` 可覆盖端点）；URL 参数经 percent-encoding 防注入，
 原始响应体不落盘不进日志，只持久化规范化证书行。health 只报告端点配置，不发起
 网络请求。
+
+R3.3 增加 `RdapAdapter`（`rdap_lookup` 1.0，`passive_only`，注入式 lookup
+client）。目标种类白名单 domain/ip/asn（`TARGET_KINDS`）；观察保存注册组织、
+registrar、abuse 联系（仅 RDAP `abuse` 角色 vCard email）、事件时间
+（registration/expiration/last_changed）、CIDR、地址/ASN 区间、country、状态和
+nameservers。observed/not_found 是定案结果；rate_limited/http_error/unsupported/
+invalid_response/timeout 属基础设施失败。真实 client
+（`rdap_client.SequentialLookupClient`）先走 `RdapOrgClient`（rdap.org bootstrap，
+`SURFACE_INTEL_RDAP_ENDPOINT` 可覆盖；404→not_found、429→rate_limited），域名
+404 且 WHOIS 能确认已注册时回退 `WhoisFallbackClient`（端口 43、IANA 首查、至多
+一次 referral；只提取白名单字段，绝不挖掘联系人地址，原始文本不落盘），回退记录
+强制携带 `data_quality=whois_fallback`。runner 对注册数据一律 `candidate` 归属：
+组织名或 ASN 相同绝不确认资产；ASN 直查在 R4 提供绑定依据前被
+`asn_scope_binding_deferred` 拒绝。
