@@ -484,8 +484,13 @@ def cmd_merge(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": "task_or_scope_not_found"}))
         return 2
     scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
-    summary = merge_task_observations(db, args.task_id, scope)
-    architecture = annotate_architecture(db, args.task_id)
+    try:
+        summary = merge_task_observations(db, args.task_id, scope)
+        architecture = annotate_architecture(db, args.task_id)
+    except Exception as exc:
+        print(json.dumps({"ok": False, "status": "failed", "error": type(exc).__name__,
+                          "detail": str(exc)[:300]}, ensure_ascii=True))
+        return 2
     print(json.dumps({
         "ok": summary.status == "completed" and architecture.status == "completed",
         "task_id": args.task_id,

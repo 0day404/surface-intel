@@ -127,3 +127,27 @@ def test_cross_source_corroboration_through_fofa(tmp_path):
     assert ip_asset["confidence"] == 0.8
     sources = {item["source"] for item in json.loads(ip_asset["sources_json"])}
     assert sources == {"dns_resolver", "fofa_mcp"}
+
+
+@pytest.mark.asyncio
+async def test_sibling_fofa_rows_share_current_lifecycle(tmp_path):
+    """Regression (real FOFA smoke): one observation row per result item —
+    sibling services from the same fetch round must all stay current, none
+    may be marked disappeared just because another row was processed later."""
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    _observation(db, "t", "fofa_mcp", {
+        "host": "https://www.example.com", "ip": "203.0.113.5", "port": 443,
+        "protocol": "https", "status": "observed",
+    }, observed_at="2026-10-04T10:00:01+00:00")
+    _observation(db, "t", "fofa_mcp", {
+        "host": "www.example.com", "ip": "203.0.113.5", "port": 80,
+        "protocol": "http", "status": "observed",
+    }, observed_at="2026-10-04T10:00:02+00:00")
+    merge_task_observations(db, "t", scope)
+    lifecycle = {row["normalized_value"]: row["current_status"]
+                 for row in _rows(db, "SELECT * FROM asset WHERE asset_type='service'")}
+    assert lifecycle == {
+        "203.0.113.5:443/https": "current",
+        "203.0.113.5:80/http": "current",
+    }

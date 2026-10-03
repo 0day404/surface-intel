@@ -39,6 +39,10 @@ AGING_DECAY = -0.1
 STALE_DECAY = -0.2
 CONFIDENCE_FLOOR = 0.2
 LIFECYCLE_STATUSES = ("current", "disappeared", "unknown")
+# observations landing within this window of the newest one count as the same
+# fetch round (FOFA result rows arrive seconds apart); DNS-style re-runs are
+# hours apart and still form separate rounds
+SIBLING_WINDOW_SECONDS = 120
 
 # Attributes tracked for source conflicts; conflicting values are preserved
 # as unresolved conflict rows, never silently picked.
@@ -155,8 +159,8 @@ def freshness_decay(last_seen: str | None, as_of: str | None) -> float:
     if not last_seen or not as_of:
         return FRESH_DECAY
     try:
-        seen = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00"))
-        now = datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+        seen = _parse_timestamp(last_seen)
+        now = _parse_timestamp(as_of)
     except ValueError:
         return FRESH_DECAY
     days = (now - seen).total_seconds() / 86400
@@ -165,6 +169,15 @@ def freshness_decay(last_seen: str | None, as_of: str | None) -> float:
     if days <= AGING_DAYS:
         return AGING_DECAY
     return STALE_DECAY
+
+
+def _parse_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    # SQLite CURRENT_TIMESTAMP fallbacks are naive; treat them as UTC so
+    # mixed-format inputs never crash the merge.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def asset_confidence(
@@ -219,7 +232,7 @@ class _MergeWorkspace:
         self.scope = scope
         self.assets: dict[tuple[str, str], _AssetDraft] = {}
         self.relations: dict[tuple[str, str, str], dict[str, Any]] = {}
-        self.latest: dict[tuple[tuple[str, str], str], str] = {}
+        self.latest: dict[tuple[tuple[str, str], str], str] = {}  # (anchor,type) -> newest observed_at
         self.skipped: list[dict[str, str]] = []
 
     def asset(
@@ -279,8 +292,12 @@ class _MergeWorkspace:
     ) -> None:
         if from_key is None or to_key is None or from_key == to_key:
             return
-        # observations arrive in rowid order, so the last write is the latest
-        self.latest[(from_key, relation_type)] = observation_id
+        # sibling observations of one fetch round share a timestamp and must
+        # all count as current (FOFA rows: one service per observation row)
+        key_ts = (from_key, relation_type)
+        previous = self.latest.get(key_ts)
+        if previous is None or _parse_timestamp(observed_at) >= _parse_timestamp(previous):
+            self.latest[key_ts] = observed_at
         key = (from_key, to_key, relation_type)
         entry = self.relations.get(key)
         provenance = {"source": source, "observation_id": observation_id, "observed_at": observed_at}
@@ -599,9 +616,8 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                 status = "candidate"  # weak relations are never confirmed
             elif _stored_scope_status(connection, task_id, to_asset["asset_id"]) == "confirmed" and strength == "strong":
                 status = "confirmed"
-            latest_observation = workspace.latest.get((from_key, relation_type))
-            in_latest = any(item["observation_id"] == latest_observation
-                            for item in entry["provenance"])
+            latest_timestamp = workspace.latest.get((from_key, relation_type))
+            in_latest = _within_sibling_window(entry["provenance"], latest_timestamp)
             existing_relation = connection.execute(
                 """SELECT relation_id,provenance_json,current_status FROM asset_relation
                    WHERE from_asset_id=? AND to_asset_id=? AND relation_type=?""",
@@ -623,12 +639,20 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                 merged = _merge_provenance(existing_relation["provenance_json"], entry["provenance"])
                 lifecycle, transition = _lifecycle_transition(
                     existing_relation["current_status"], in_latest)
-                connection.execute(
-                    """UPDATE asset_relation SET provenance_json=?, current_status=?, last_transition=?
-                       WHERE relation_id=?""",
-                    (json.dumps(merged, ensure_ascii=True, sort_keys=True),
-                     lifecycle, transition, existing_relation["relation_id"]),
-                )
+                if transition is not None:
+                    connection.execute(
+                        """UPDATE asset_relation SET provenance_json=?, current_status=?, last_transition=?
+                           WHERE relation_id=?""",
+                        (json.dumps(merged, ensure_ascii=True, sort_keys=True),
+                         lifecycle, transition, existing_relation["relation_id"]),
+                    )
+                else:
+                    # no state change: never overwrite the historical transition
+                    connection.execute(
+                        "UPDATE asset_relation SET provenance_json=? WHERE relation_id=?",
+                        (json.dumps(merged, ensure_ascii=True, sort_keys=True),
+                         existing_relation["relation_id"]),
+                    )
                 relations_updated += 1
 
         # asset-level rollup: a non-scope asset with relations but no current
@@ -662,6 +686,25 @@ def _stored_scope_status(connection, task_id: str, asset_id: str) -> str:
         (task_id, asset_id),
     ).fetchone()
     return row["scope_status"] if row else "candidate"
+
+
+def _within_sibling_window(provenance: list[dict[str, Any]], latest_timestamp: str | None) -> bool:
+    if latest_timestamp is None:
+        return False
+    try:
+        latest = _parse_timestamp(latest_timestamp)
+    except ValueError:
+        return False
+    for item in provenance:
+        stamp = item.get("observed_at")
+        if not stamp:
+            continue
+        try:
+            if abs((_parse_timestamp(stamp) - latest).total_seconds()) <= SIBLING_WINDOW_SECONDS:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _lifecycle_for_new(in_latest: bool) -> tuple[str, str]:

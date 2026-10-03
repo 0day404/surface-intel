@@ -172,3 +172,27 @@ def test_disappeared_asset_rollup_and_stable_remerge(tmp_path):
     # lifecycle never touches scope authorization
     assets2 = {row["normalized_value"]: row for row in _rows(db2, "SELECT * FROM asset")}
     assert assets2["203.0.113.5"]["scope_status"] == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_remerge_preserves_last_transition_history(tmp_path):
+    """Idempotent re-merges must not erase the recorded lifecycle transition."""
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    _observation(db, "t", "dns_resolver", {
+        "target": "www.example.com", "record_type": "A", "records": ["203.0.113.5"],
+        "status": "observed",
+    }, observed_at="2026-10-04T10:00:00+00:00")
+    _observation(db, "t", "dns_resolver", {
+        "target": "www.example.com", "record_type": "A", "records": ["203.0.113.5"],
+        "status": "observed",
+    }, observed_at="2026-10-04T11:00:00+00:00")
+    merge_task_observations(db, "t", scope)
+    relation = next(r for r in _rows(db, "SELECT * FROM asset_relation")
+                    if r["relation_type"] == "dns_a")
+    assert relation["last_transition"] == "new"
+    merge_task_observations(db, "t", scope)
+    relation = next(r for r in _rows(db, "SELECT * FROM asset_relation")
+                    if r["relation_type"] == "dns_a")
+    assert relation["current_status"] == "current"
+    assert relation["last_transition"] == "new"  # preserved, not overwritten
