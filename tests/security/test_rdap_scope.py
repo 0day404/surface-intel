@@ -162,3 +162,39 @@ async def test_rdap_observations_never_create_assets(tmp_path):
     client = SpyRdapClient(_record())
     await run_rdap_lookup(db, client, task_id="t", scope=scope, target="203.0.113.5", kind="ip")
     assert next(db.rows("SELECT COUNT(*) AS count FROM asset"))["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_string_active_level_from_payload_never_bypasses_passive_gate(tmp_path):
+    """Regression (real smoke): a scope document carrying the level as a raw
+    string must still be gated as passive-only, never slip through as active."""
+    from surface_intel.safe_http_runner import run_http_observe
+
+    scope = Scope.from_dict({
+        "authorized_domains": ["example.com"],
+        "confirmed": True,
+        "active_testing_allowed": True,
+        "active_testing_level": "passive_only",  # raw string from JSON
+    })
+    # coercion makes the level an enum equal to PASSIVE_ONLY
+    from surface_intel.states import ActiveLevel
+    assert scope.active_testing_level == ActiveLevel.PASSIVE_ONLY
+
+    db = _setup(tmp_path, scope)
+    client = SpyRdapClient(_record())
+    result = await run_http_observe(db, client, task_id="t", scope=scope,
+                                    url="https://www.example.com/")
+    assert result.status == "blocked"
+    assert result.error == "active_testing_not_authorized"
+    assert client.calls == []
+
+
+def test_unknown_level_string_fails_closed_to_passive_only():
+    from surface_intel.states import ActiveLevel
+
+    scope = Scope.from_dict({
+        "authorized_domains": ["example.com"],
+        "confirmed": True,
+        "active_testing_level": "total_annihilation",
+    })
+    assert scope.active_testing_level == ActiveLevel.PASSIVE_ONLY

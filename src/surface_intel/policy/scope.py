@@ -30,6 +30,15 @@ class Scope:
     starts_at: str | None = None
     ends_at: str | None = None
 
+    def __post_init__(self):
+        # fail-closed coercion: a string level from a scope document must
+        # never compare unequal to the enum and slip past passive-only gates
+        if isinstance(self.active_testing_level, str):
+            try:
+                object.__setattr__(self, "active_testing_level", ActiveLevel(self.active_testing_level))
+            except ValueError:
+                object.__setattr__(self, "active_testing_level", ActiveLevel.PASSIVE_ONLY)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Scope":
         return cls(

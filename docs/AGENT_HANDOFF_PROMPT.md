@@ -82,15 +82,18 @@ rtk uv run pytest -q
 | P0-P6 | completed | 离线骨架、安全门控、恢复、委派和报告已实现 |
 | R0 | completed | 能力状态契约和覆盖基线已冻结 |
 | R1 | completed | 统一执行器、scope/time/budget 门控已接入 |
-| R2 | bounded | 真实 FOFA stdio、查询、分页、批次、证据和报告闭环已接入 |
-| R3 | next | DNS/CT/RDAP 被动多源闭环 |
-| R4 | planned | 资产归并、架构识别和来源质量 |
-| R5 | planned | 预算、速率、并发、停止和恢复强化 |
-| R6 | planned | Safe HTTP/Port/Playwright 真实观察 |
-| R7 | planned | 报告、差异监控和最终验收 |
+| R2 | accepted (2026-10-04) | 真实 FOFA 闭环 + R3-R7 验收通过后由 bounded 升级（见 R7 最终验收 checkpoint） |
+| R3 | completed (2026-10-03) | DNS/CT/RDAP 被动多源闭环（含 ctlogs.dev 备源与自动故障转移） |
+| R4 | completed (2026-10-03/04) | 资产归并、架构识别、来源质量（migration 8-11） |
+| R5 | completed (2026-10-04) | 四级预算、速率/并发、stop token、scope 冻结、真实调度模式 |
+| R6 | completed (2026-10-04) | Safe HTTP/Port/Playwright 真实观察（架构门控+review item） |
+| R7 | completed (2026-10-04) | 报告十六表、baseline 监控差异、case 验收与 CLI 全链路 |
 
-R2 不能标记为 unrestricted production。必须保留 `bounded`，直到 R3-R7 的
-限制、覆盖、预算、归并和主动观察能力完成并通过验收。
+R2 升级依据（原 `bounded` 升级条件已满足）：R3-R7 的限制、覆盖、预算、归并
+和主动观察能力已全部实现并通过 324 项五类测试；2026-10-04 在授权目标
+`www.ceramtec-group.cn` 上完成真实全链 smoke（FOFA 查询/拆批 + 归并 +
+架构门控 + Safe HTTP/Port 主动观察），期间发现并修复 3+1 个真实缺陷。
+真实多页分页与更大范围授权的持续监控仍以单次授权任务为单位执行。
 
 ## 3. 已完成的架构和能力
 
