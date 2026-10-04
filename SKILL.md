@@ -15,12 +15,12 @@ description: Drive attack-surface information collection from this project — i
 | ----------------- | ---------------------------------------------------------- | --------------------------------- |
 | `[SKILL_DIR]`     | 本 skill 目录绝对路径(=工具项目根,含 pyproject.toml)       | `E:/Work/AI/Skills/surface-intel` |
 | `[WORK_ROOT]`     | 使用本 skill 的工作项目根(任务/报告/目标清单/清单位于其下) | `E:/Work/Claude/sec`              |
-| `[FOFA_MCP_ROOT]` | 独立 fofa-mcp 项目根(外部依赖)                             | 见下方解析规则                    |
+| `[FOFA_MCP_ROOT]` | fofa-mcp 子项目根(已内置在 skill 目录内)                   | `[SKILL_DIR]/fofa-mcp`            |
 
 **迁移到新机器/新位置的三步**:
 
-1. 把整个 skill 目录(含 `pyproject.toml`/`src`/`tests`/`docs`)拷到任意位置;若单独部署工具,把依赖的 `fofa-mcp` 项目放在本目录**同级**(即 `[SKILL_DIR]/../fofa-mcp`,工具自动识别)或设 env `SURFACE_INTEL_FOFA_ROOT` 指向它(三级解析:env > 同级目录 > 历史路径 `E:\Work\Copilot\fofa-mcp`,代码 `_default_fofa_root()` 已实现)。
-2. 首次运行前在 `[SKILL_DIR]` 下 `uv sync`(或让 `uv run` 首次自动装);运行 FOFA MCP 服务侧需 fofa-mcp 自身的 `.env`(FOFA 凭据从不进入本工具)。
+1. 把整个 skill 目录(含内置的 `fofa-mcp/` 子项目与 `pyproject.toml`/`src`/`tests`/`docs`)拷到任意位置即完成部署——fofa-mcp 随目录整体走。工具侧三级解析(代码 `_default_fofa_root()`):env `SURFACE_INTEL_FOFA_ROOT` > 内置 `[SKILL_DIR]/fofa-mcp` > 历史路径 `E:\Work\Copilot\fofa-mcp`(旧机兼容兜底)。
+2. 首次运行前在 `[SKILL_DIR]` 与 `[SKILL_DIR]/fofa-mcp` 各 `uv sync`(或让 `uv run` 首次自动装);FOFA 凭据在内置子项目的 `[SKILL_DIR]/fofa-mcp/.env`(从不进入本工具,git 已忽略)。
 3. 确定本工作项目的 `[WORK_ROOT]`,在其 `docs/` 下维护 `surface-intel-backlog.md`(待办)与 `surface-intel-issues.md`(问题清单)。
 
 **书写规则**(实测约束):
@@ -254,10 +254,12 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 - `ct-health` 只验配置不发请求(`verified:false` 是诚实标注);真实查询 failover 看 ct-search/recon 输出的 `failovers` 计数;`SURFACE_INTEL_CT_SOURCE=crtsh|ctlogs|auto`,ctlogs.dev 匿名 100 req/h。crt.sh `rate_limited/http_error` 重跑合法。
 - `port-check` 的 `allowed_ports` 空清单=零授权;`--allow-hosted-third-party` 只解除 third_party 拦截,cdn/waf/lb/cloud_hosting 始终拦。
 - merge 幂等可重复;同一 RDAP 记录多组织名不再互报 conflict,跨观察值集分歧才报 unresolved。
-- FOFA MCP(`[FOFA_MCP_ROOT]`,独立项目)未配置时返回 `not_configured`,不伪造结果;其凭据只由 fofa-mcp 自己从受控环境读取。
+- FOFA MCP(内置子项目 `[SKILL_DIR]/fofa-mcp`,仍按独立子项目对待——未经批准不修改,改动经本仓库 git 追溯,历史基线=原仓 `E:\Work\Copilot\fofa-mcp` 冻结于 `e851ed1`)未配置时返回 `not_configured`,不伪造结果;凭据只由它自己从 `.env` 读取。
 - Windows/Python 3.14 的 asyncio `unclosed transport` 警告已在入口抑制。
 
 ## 工具侧状态
+
+2026-10-05 **fofa-mcp 内置化**:原独立项目(`e851ed1`,0.2.0,76 tests)vendored 进本仓库 `fofa-mcp/`(无独立 .git,改动经本仓库 git 追溯),三级解析第二档直接命中;sec `.mcp.json` 的 fofa server 已指向内置副本。实测:两级 `uv sync` 后 fofa-mcp 76 tests + surface-intel 438 tests 全绿,`fofa-health --real` 走内置副本 `.env` 双账号 available。
 
 2026-10-05 **迁移至 AI/Skills 并可移植化**:`_default_fofa_root()` 三级解析(env `SURFACE_INTEL_FOFA_ROOT` > 同级 `fofa-mcp/` > 历史路径),README/AGENT_HANDOFF 路径占位化;SKILL.md 自包含进 skill 目录,组件检查清单随仓(`docs/component-checklist.md`)。
 

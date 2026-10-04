@@ -8,3 +8,11 @@ reports/
 evidence/
 runtime/
 tmp_debug/
+
+# 凭据（全仓安全网）与 vendored fofa-mcp 子项目工件
+.env
+fofa-mcp/.mypy_cache/
+fofa-mcp/.ruff_cache/
+fofa-mcp/dist/
+fofa-mcp/build/
+fofa-mcp/*.egg-info/

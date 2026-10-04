@@ -30,11 +30,12 @@ uv run surface-intel fofa-health --real
 uv run surface-intel fofa-search --task-root .\task <task-id> --domain example.com --real --confirm-real
 ```
 
-查询命令要求任务范围已确认、域名在授权范围内，并通过独立
-fofa-mcp 项目的 stdio MCP 进程调用（部署位置三级解析：env
-`SURFACE_INTEL_FOFA_ROOT` > 本项目同级 `fofa-mcp/` 目录 > 历史固定
+查询命令要求任务范围已确认、域名在授权范围内，并通过 fofa-mcp
+子项目的 stdio MCP 进程调用（fofa-mcp 已 vendored 于本仓库 `fofa-mcp/`
+目录，保持独立版本与测试；部署位置三级解析：env
+`SURFACE_INTEL_FOFA_ROOT` > 本仓库内置 `fofa-mcp/` > 历史固定
 路径 `E:\Work\Copilot\fofa-mcp`）；凭据只由 FOFA MCP 自己从其
-受控环境读取，不进入 `surface-intel` 参数、SQLite 或报告。未配置或连接失败时
+受控环境（`fofa-mcp/.env`，git 已忽略）读取，不进入 `surface-intel` 参数、SQLite 或报告。未配置或连接失败时
 返回 `not_configured`/失败状态，不伪造结果。
 
 R3.1 起真实被动 DNS 入口同样显式受控：
@@ -101,4 +102,5 @@ uv run surface-intel init .\task
 ```
 
 未确认授权范围的任务会进入 `awaiting_scope`，`validate` 返回非零状态并禁止外部调用。
-FOFA 仅会通过后续的独立适配器引用 fofa-mcp 项目（位置解析见上文），不会复制或修改该项目。
+FOFA 仅会通过后续的独立适配器引用 fofa-mcp 子项目（已 vendored 于本仓库
+`fofa-mcp/`，位置解析见上文）；子项目保持自身版本与测试，改动遵循 MCP 修改审批规则。

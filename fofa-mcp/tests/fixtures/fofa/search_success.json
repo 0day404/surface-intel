@@ -1,0 +1,12 @@
+{
+  "error": false,
+  "results": [
+    ["192.0.2.10", "443", "https", "example.com"],
+    ["192.0.2.11", "8443", "https", "admin.example.com"]
+  ],
+  "page": 1,
+  "size": 2,
+  "next": "cursor-success",
+  "consumed_fpoint": 1,
+  "required_fpoints": 1
+}

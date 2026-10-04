@@ -4,8 +4,9 @@
 并在开始修改前阅读以下文件：
 
 > 路径约定：`<REPO_ROOT>` = 本仓库根（本文件所在仓库的顶层目录）；
-> `<FOFA_MCP_ROOT>` = 独立 fofa-mcp 项目根（解析顺序：env
-> `SURFACE_INTEL_FOFA_ROOT` > 本仓库同级 `fofa-mcp/` > 历史路径
+> `<FOFA_MCP_ROOT>` = fofa-mcp 子项目根（已 vendored 于本仓库
+> `<REPO_ROOT>/fofa-mcp/`，保持独立版本与测试；解析顺序：env
+> `SURFACE_INTEL_FOFA_ROOT` > 内置 `<REPO_ROOT>/fofa-mcp/` > 历史路径
 > `E:\Work\Copilot\fofa-mcp`）。本仓库可整体迁移，位置不固定。
 
 ```text
@@ -36,8 +37,9 @@
 <FOFA_MCP_ROOT>
 ```
 
-`surface-intel` 只能通过 Adapter 和 MCP stdio 客户端调用 FOFA。绝对不能复制、
-移动、重写或未经批准修改 `fofa-mcp`，也不能把跨源编排逻辑写入该项目。
+`surface-intel` 只能通过 Adapter 和 MCP stdio 客户端调用 FOFA。fofa-mcp 虽然
+vendored 在本仓库 `fofa-mcp/`，仍按独立子项目对待：未经批准不得重写或修改，
+也不能把跨源编排逻辑写入该项目。
 
 Playwright MCP 是外部组件，命令为：
 
@@ -312,8 +314,8 @@ rtk uv run surface-intel fofa-search `
 4. 告知用户需要申请的具体修改、影响范围和验证方式；
 5. 只有用户明确同意后，才可以修改并测试 MCP。
 
-除非获得明确批准，不得触碰 `fofa-mcp`。测试前后应检查其 Git 状态和文件
-变化，证明没有污染外部项目。
+除非获得明确批准，不得触碰 `fofa-mcp`。vendored 副本无独立 `.git`——改动经
+本仓库 git 追溯；历史基线以原仓 `E:\Work\Copilot\fofa-mcp`（冻结于 `e851ed1`）为准。
 
 ## 7. 下一步正确工作顺序
 

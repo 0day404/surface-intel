@@ -1,0 +1,27 @@
+[project]
+name = "fofa-mcp"
+version = "0.2.0"
+description = "Secure, agent-friendly FOFA MCP server"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1,<1",
+    "mcp>=1.9.0,<2",
+    "python-dotenv>=1.0.0,<2",
+]
+
+[project.scripts]
+fofa-mcp = "fofa_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.23,<1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
