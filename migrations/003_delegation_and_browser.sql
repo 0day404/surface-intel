@@ -1,2 +1,0 @@
--- Schema version 3: subtasks, agent leases, idempotent subtask results.
--- Playwright remains an external MCP process and is not vendored.

@@ -12,6 +12,7 @@ from .adapters.base import AdapterResult
 from .adapters.capabilities import CapabilityRegistry
 from .adapters.safe_http import SafeHttpAdapter
 from .execution import AdapterExecutor, ExecutionContext
+from .pacing import configured_rate_limiter
 from .policy.scope import Scope
 from .state.database import Database
 from .states import ActiveLevel
@@ -193,6 +194,7 @@ async def run_http_observe(
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
     context = ExecutionContext(
+        rate_limiter=configured_rate_limiter("safe_http"),
         task_id=task_id,
         scope_version=scope.scope_version,
         scope_confirmed=True,

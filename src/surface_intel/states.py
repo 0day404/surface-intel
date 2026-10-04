@@ -44,7 +44,6 @@ class ActiveLevel(StrEnum):
 
 class IntegrityStatus(StrEnum):
     COMPLETE = "complete"
-    BOUNDED = "bounded"
     PARTIAL = "partial"
     FAILED = "failed"
     UNKNOWN = "unknown"

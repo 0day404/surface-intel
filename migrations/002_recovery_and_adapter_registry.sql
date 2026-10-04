@@ -1,2 +1,0 @@
--- Schema version 2: recovery timestamps, action attempts, adapter registry.
--- Database.initialize() applies this migration idempotently for SQLite databases.

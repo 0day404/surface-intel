@@ -10,14 +10,14 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from . import __version__
 from .adapters.ct import CtLogClient
 
 DEFAULT_CT_ENDPOINT = "https://crt.sh/"
 
 FetchFunc = Callable[[str, float], tuple[int, str]]
 
-
-USER_AGENT = "surface-intel/0.1.0 (passive CT lookup)"
+USER_AGENT = f"surface-intel/{__version__} (passive CT lookup)"
 
 
 def _default_fetch(url: str, timeout: float, headers: dict[str, str] | None = None) -> tuple[int, str]:

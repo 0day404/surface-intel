@@ -10,6 +10,7 @@ from .adapters.mock import MockFofaAdapter, MockPassiveAdapter
 from .adapters.capabilities import CapabilityRegistry
 from .execution import AdapterExecutor, ExecutionContext
 from .normalization import normalize_target
+from .pacing import configured_rate_limiter
 from .state.database import Database
 from .state.actions import ActionRepository
 from .state.recovery import create_checkpoint, latest_checkpoint
@@ -64,6 +65,7 @@ async def run_offline_task(
         scope_confirmed=True,
         active_level="passive_only",
         max_consecutive_errors=max_consecutive_errors,
+        rate_limiter=configured_rate_limiter("coordinator"),
         metadata={
             "authorized_domains": json.loads(scope_row["payload_json"]).get("authorized_domains", []),
             "scope_payload": json.loads(scope_row["payload_json"]),
@@ -237,21 +239,22 @@ async def run_offline_task(
 def _ensure_delegated_subtask(db: Database, task_id: str, adapter_name: str, scope_version: str) -> str:
     """Idempotent subtask row per adapter group; the lease table stays ready
     for real worker claims in the online phase."""
+    from .state.delegation import create_subtask
+
     idempotency_key = f"delegated:{task_id}:collecting_passive:{adapter_name}"
     existing = next(db.rows("SELECT subtask_id FROM subtask WHERE idempotency_key=?", (idempotency_key,)), None)
     if existing is not None:
         return existing["subtask_id"]
-    subtask_id = f"subtask-{uuid.uuid4().hex[:16]}"
-    with db.connect() as connection:
-        connection.execute(
-            """INSERT INTO subtask(subtask_id,parent_task_id,role,phase,scope_version,
-                                   allowed_tools_json,forbidden_actions_json,status,idempotency_key)
-               VALUES(?,?,?,?,?,?,?,?,?)""",
-            (subtask_id, task_id, f"worker:{adapter_name}", "collecting_passive", scope_version,
-             json.dumps(["adapter:" + adapter_name]), json.dumps(["active_probing"]),
-             "planned", idempotency_key),
-        )
-    return subtask_id
+    return create_subtask(
+        db,
+        parent_task_id=task_id,
+        role=f"worker:{adapter_name}",
+        phase="collecting_passive",
+        scope_version=scope_version,
+        allowed_tools=["adapter:" + adapter_name],
+        forbidden_actions=["active_probing"],
+        idempotency_key=idempotency_key,
+    )
 
 
 def _store_observation(connection, task_id: str, result, item: dict) -> None:

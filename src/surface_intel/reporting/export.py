@@ -29,11 +29,16 @@ def compute_integrity_status(
     unknown_actions: int,
     failed_actions: int,
     pending_actions: int,
+    total_actions: int = 0,
 ) -> str:
     if task_status in {"failed"}:
         return "failed"
     if task_status in {"paused", "blocked", "cancelled", "needs_review"}:
         return "partial"
+    if total_actions == 0:
+        # 真实 recon 不写 action 行（plan/run 才写）：action 维度不得把
+        # 无 action 行的任务拖成 unknown。缺口仍诚实降级 partial。
+        return "partial" if gaps else "complete"
     if failed_actions and not gaps:
         return "partial"
     if unknown_actions or pending_actions:
@@ -88,12 +93,16 @@ def build_report(db: Database, task_id: str, output_dir: str | Path,
     pending_actions = sum(1 for row in db.rows(
         "SELECT status FROM action WHERE task_id=? AND status IN ('planned','started')", (task_id,)
     ))
+    total_actions = next(db.rows(
+        "SELECT COUNT(*) AS n FROM action WHERE task_id=?", (task_id,)
+    ), {"n": 0})["n"]
     integrity_status = compute_integrity_status(
         task["status"],
         gaps=gaps,
         unknown_actions=unknown_actions,
         failed_actions=failed_actions,
         pending_actions=pending_actions,
+        total_actions=total_actions,
     )
     stop_events = [
         {"event_type": row["event_type"], "payload": json.loads(row["payload_json"]),

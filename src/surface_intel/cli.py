@@ -671,7 +671,10 @@ def cmd_browser_observe(args: argparse.Namespace) -> int:
             "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
             (TaskStatus.OBSERVING_BROWSER.value, args.task_id),
         )
-    client = configured_playwright_client()
+    # 截图落 <task-root>/reports/<task-id>/screenshots/（MCP 进程以该目录为 cwd）
+    screenshots_dir = _config(args).task_root / "reports" / args.task_id / "screenshots"
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    client = configured_playwright_client(cwd=screenshots_dir)
 
     async def call():
         return await run_browser_observe(db, client, task_id=args.task_id, scope=scope,
@@ -708,15 +711,32 @@ def cmd_baseline_save(args: argparse.Namespace) -> int:
 def cmd_baseline_diff(args: argparse.Namespace) -> int:
     from dataclasses import asdict
 
-    from surface_intel.monitor import diff_against_baseline
+    from surface_intel.monitor import diff_against_baseline, diff_checkpoints
 
     db = Database(_config(args).database_path)
     task = next(db.rows("SELECT scope_version FROM task WHERE task_id=?", (args.task_id,)), None)
     if task is None:
         print(json.dumps({"ok": False, "error": "task_not_found"}))
         return 2
-    diff = diff_against_baseline(db, args.task_id, task["scope_version"])
-    print(json.dumps({"ok": True, **asdict(diff)}, ensure_ascii=True))
+    if getattr(args, "baseline", None):
+        # D11: 任意两次 checkpoint 对比；against 侧缺省=当前资产集
+        try:
+            diff = diff_checkpoints(db, args.task_id, args.baseline,
+                                    getattr(args, "against", None))
+        except ValueError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}))
+            return 2
+    else:
+        diff = diff_against_baseline(db, args.task_id, task["scope_version"])
+    payload = {"ok": True, **asdict(diff)}
+    output_path = getattr(args, "output", None)
+    if output_path:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({"ok": True, "task_id": args.task_id, "output": str(out)}))
+    else:
+        print(json.dumps(payload, ensure_ascii=True))
     return 0
 
 
@@ -945,7 +965,6 @@ def build_parser() -> argparse.ArgumentParser:
         elif name not in {"fofa-health", "dns-health", "ct-health", "rdap-health"}:
             command.add_argument("--task-root", required=True)
         if name == "create":
-            command.add_argument("--input", required=False)
             command.add_argument("--scope", required=True)
         if name == "run":
             command.add_argument("--mode", choices=("serial", "delegated", "hybrid"), default="serial")
@@ -1039,6 +1058,11 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")
             command.add_argument("--reason", default="")
+        if name == "baseline-diff":
+            # D11: 任意两次 checkpoint 对比 + diff 结果导出（缺省=latest baseline vs 当前）
+            command.add_argument("--baseline", default=None)
+            command.add_argument("--against", default=None)
+            command.add_argument("--output", default=None)
         if name in {"pause", "cancel", "resume"}:
             command.add_argument("--reason", default="")
     return parser

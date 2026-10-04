@@ -11,6 +11,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from . import __version__
+
 # Only low-impact methods ever leave the runner; everything else is refused
 # in adapter validation.
 ALLOWED_METHODS = ("GET", "HEAD")
@@ -45,7 +47,7 @@ def _default_fetch_hop(url: str, method: str, timeout: float):
         connection = http.client.HTTPConnection(
             parts.hostname, parts.port or 80, timeout=timeout)
     try:
-        connection.request(method, target, headers={"Accept": "*/*", "User-Agent": "surface-intel/0.1.0"})
+        connection.request(method, target, headers={"Accept": "*/*", "User-Agent": f"surface-intel/{__version__}"})
         response = connection.getresponse()
         body = response.read(_BODY_CAP)
         peer = connection.sock.getpeercert(binary_form=True) if parts.scheme == "https" else None

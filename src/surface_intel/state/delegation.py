@@ -1,3 +1,9 @@
+"""Worker-delegation primitives: subtasks, leases, results.
+
+平台预留 API（D13）：0.2.0 未接入生产编排——生产路径是 recon 与各真实 runner。
+唯一进程内调用方是 coordinator 的 delegated 演示模式（run --mode delegated）；
+lease/result 原语为多 worker 在线编排预留，接口已按幂等键设计完毕。
+"""
 from __future__ import annotations
 
 import json

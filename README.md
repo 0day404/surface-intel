@@ -3,7 +3,8 @@
 `surface-intel` 是一个授权范围内的攻击面情报编排器。当前已提供离线 P0-P3
 最小闭环：
 
-- `init`、`create`、`preflight`、`plan`、`run`、`status`、`validate`、`report`；
+- `init`、`create`、`preflight`、`plan`、`run`、`status`、`validate`、`report`
+  （`plan`/`run` 是 Mock 适配器驱动的离线演示闭环，生产路径是 `recon` 与各真实入口，见下）；
 - 范围标准化、排除项优先、动作幂等、Mock 被动/FOFA 多页适配器；
 - SQLite 观察/证据/资产/缺口索引，以及可重建 JSON/XLSX。
 - P4 安全主动门控、能力矩阵、Safe HTTP/Port 适配器和 P5 checkpoint/崩溃恢复。
@@ -13,7 +14,10 @@ P6 的 Playwright 连接通过注入的 MCP 调用边界测试；项目不复制
 `node_modules`、浏览器缓存或凭据。
 
 `run` 支持 `--mode serial|delegated|hybrid`；三种模式共享同一持久化状态和安全门控。
-恢复时读取 checkpoint，未知外部终态不会被自动重放。
+恢复时读取 checkpoint，未知外部终态不会被自动重放。**注意**：`plan`/`run` 是离线
+演示闭环（Mock 适配器，`planning.py` 固定 `mock_passive`），勿在生产任务上执行
+`plan`——写入的 mock planned 行会让 `report` integrity 停在 `unknown`（有 action
+行即受 action 维度约束；真实 recon 不写 action 行，不产生该噪声）。
 
 当前真实数据源仍需单独配置和契约验证。适配器能力状态明确区分
 `available`、`degraded`、`not_configured`、`unsupported` 和 `failed`；Mock
@@ -40,7 +44,8 @@ uv run surface-intel dns-lookup --task-root .\task <task-id> --domain www.exampl
 
 `dns-lookup` 要求任务范围已确认且域名在授权范围内；默认查询 A/AAAA/CNAME/NS/
 MX/TXT/SOA（`--types` 可收窄，白名单外类型被拒绝）。每个记录类型是独立动作，
-经统一执行器写入 `adapter_call` 审计并受任务 `dns_resolver` 预算约束。解析出的
+经统一执行器写入 `adapter_call` 审计（预算机制 opt-in、默认未接线；适配器间
+限速由 `SURFACE_INTEL_MIN_INTERVAL_*` 默认接线，见 OPERATIONS R5）。解析出的
 CNAME 目标、IP 和第三方域名只产生 `candidate` 观察，不会被递归解析或确认为资产。
 
 R3.2 起真实被动 CT 入口同样显式受控：
@@ -75,6 +80,11 @@ R4.1 起提供离线资产归并：`surface-intel merge <task-id> --task-root .\
 把 DNS/CT/RDAP 观察幂等归并为统一资产模型（domain/ip/cidr/asn/organization、
 强/中关联、来源 provenance、置信度、first/last seen 分层、冲突保留）。
 归并纯本地计算，不发起网络请求；弱关联与归属类资产永不确认。
+
+范围修订与监控基线：`scope-amend`（扩 IP/域名/主动授权/端口，`--confirm` 单事务
+落快照并冻结旧版本动作）、`baseline-save` / `baseline-diff`（监控基线与任意两次
+checkpoint 的资产差量对比，`--baseline/--against/--output` 可选）——详见
+OPERATIONS.md。
 
 P0 只提供离线项目骨架、
 SQLite 状态、配置、状态枚举、脱敏日志以及 `init`、`create`、`status`、`validate`

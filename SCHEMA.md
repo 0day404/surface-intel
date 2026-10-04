@@ -1,6 +1,8 @@
 # Schema
 
-当前 schema version 为 `1.0`，SQLite migration version 为 `7`。
+当前 schema version 为 `1.0`，SQLite migration version 为 `12`
+（migration 8-12 见 `src/surface_intel/state/database.py` 的 `SCHEMA_VERSION = 12` 与迁移序列；
+migration 12 新增 `asset.attributes_json` 与 `redaction_map`）。
 
 适配器能力状态使用 `available`、`degraded`、`not_configured`、`unsupported`
 和 `failed`。能力状态是预检和报告字段；`not_configured`、`unsupported` 或

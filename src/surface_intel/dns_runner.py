@@ -9,6 +9,7 @@ from .adapters.base import AdapterResult
 from .adapters.capabilities import CapabilityRegistry
 from .adapters.dns import DNS_RECORD_TYPES, DnsAdapter
 from .execution import AdapterExecutor, ExecutionContext
+from .pacing import configured_rate_limiter
 from .policy.scope import Scope
 from .state.database import Database
 from .state.observations import store_unified_observations
@@ -115,6 +116,7 @@ async def run_dns_lookup(
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
     context = ExecutionContext(
+        rate_limiter=configured_rate_limiter("dns"),
         task_id=task_id,
         scope_version=scope.scope_version,
         scope_confirmed=True,

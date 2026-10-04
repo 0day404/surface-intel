@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from .adapters.capabilities import CapabilityRegistry
 from .adapters.safe_port import SafePortAdapter
 from .execution import AdapterExecutor, ExecutionContext
+from .pacing import configured_rate_limiter
 from .policy.scope import Scope
 from .safe_http_runner import _ensure_review_item, _architecture_block
 from .state.database import Database
@@ -116,6 +117,7 @@ async def run_port_check(
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
     context = ExecutionContext(
+        rate_limiter=configured_rate_limiter("safe_port"),
         task_id=task_id,
         scope_version=scope.scope_version,
         scope_confirmed=True,

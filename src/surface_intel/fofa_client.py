@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import __version__
+
 
 class FofaClientError(RuntimeError):
     pass
@@ -138,7 +140,7 @@ class FofaStdioClient:
             {
                 "protocolVersion": self.protocol_version,
                 "capabilities": {},
-                "clientInfo": {"name": "surface-intel", "version": "0.1.0"},
+                "clientInfo": {"name": "surface-intel", "version": __version__},
             },
         )
         result = unwrap_mcp_result(response)

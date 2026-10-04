@@ -8,6 +8,10 @@ from typing import Any
 from ..states import ActionStatus, TaskStatus
 from .database import Database
 
+# baseline 快照（monitor.save_baseline）也是 checkpoint，但不是续跑断点：
+# resume/latest_checkpoint 必须跳过它，否则 FOFA 分页断点会被归零（D11）。
+BASELINE_PHASE = "baseline"
+
 
 def create_checkpoint(
     db: Database,
@@ -34,8 +38,9 @@ def create_checkpoint(
 def latest_checkpoint(db: Database, task_id: str) -> dict[str, Any] | None:
     row = next(
         db.rows(
-            "SELECT * FROM checkpoint WHERE task_id=? AND status='valid' ORDER BY created_at DESC LIMIT 1",
-            (task_id,),
+            "SELECT * FROM checkpoint WHERE task_id=? AND status='valid' AND phase!=? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (task_id, BASELINE_PHASE),
         ),
         None,
     )

@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from .adapters.capabilities import CapabilityRegistry
 from .adapters.playwright import PlaywrightAdapter
 from .execution import AdapterExecutor, ExecutionContext
+from .pacing import configured_rate_limiter
 from .policy.scope import Scope
 from .safe_http_runner import _architecture_block, _ensure_review_item
 from .state.database import Database
@@ -109,6 +110,7 @@ async def run_browser_observe(
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
     context = ExecutionContext(
+        rate_limiter=configured_rate_limiter("playwright"),
         task_id=task_id,
         scope_version=scope.scope_version,
         scope_confirmed=True,

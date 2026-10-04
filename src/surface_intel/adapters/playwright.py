@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..policy.scope import Scope
 from ..states import ActionStatus
 from .base import AdapterManifest, AdapterResult, TaskContext
 
@@ -35,12 +36,22 @@ class PlaywrightAdapter:
     async def validate(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
         target = str(action.get("lookup_target", "")).strip() or str(action.get("target", ""))
         host = urlsplit(target).hostname
-        allowed_domains = tuple(context.metadata.get("allowed_domains", ()))
         if not host or urlsplit(target).scheme not in {"http", "https"}:
             return AdapterResult("blocked", error="browser_target_required")
         if not context.scope_confirmed or context.active_level not in {"safe_discovery", "safe_probe"}:
             return AdapterResult("blocked", error="browser_authorization_required")
-        if allowed_domains and not any(host == domain or host.endswith("." + domain.lstrip("*.")) for domain in allowed_domains):
+        # 与 runner 门控用同一个 Scope 判定（scope_payload 优先）；旧注入路径
+        # （无 scope_payload）退回 allowed_domains 后缀匹配，保持兼容。
+        scope_payload = context.metadata.get("scope_payload")
+        if scope_payload:
+            host_allowed = Scope.from_dict(scope_payload).is_in_scope(host)
+        else:
+            allowed_domains = tuple(context.metadata.get("allowed_domains", ()))
+            host_allowed = (
+                not allowed_domains
+                or any(host == domain or host.endswith("." + domain.lstrip("*.")) for domain in allowed_domains)
+            )
+        if not host_allowed:
             return AdapterResult("blocked", error="browser_domain_not_authorized")
         if action.get("allow_login") or action.get("allow_state_change") or action.get("allow_download"):
             return AdapterResult("blocked", error="browser_side_effect_not_allowed")
@@ -66,8 +77,12 @@ class PlaywrightAdapter:
                 "scope_anchor": anchor if target != anchor else None,
                 "final_url": result.get("final_url", target),
                 "title": result.get("title", ""),
-                "status_code": result.get("status_code"),
-                "api_requests": result.get("api_requests", []),
+                # client 产出键是 http_status/network_summary（D5 键位统一）；
+                # observation 落库键保持 status_code/network_summary 不变，
+                # merger/export 的 schema 消费侧依赖这两个键名。
+                "status_code": result.get("http_status"),
+                "network_summary": result.get("network_summary", []),
+                "partial_collection_errors": result.get("partial_collection_errors", []),
                 "third_party_origins": result.get("third_party_origins", []),
                 "console_error_count": result.get("console_error_count", 0),
                 "screenshot_ref": result.get("screenshot_ref", ""),

@@ -53,7 +53,7 @@ npx -y @playwright/mcp@latest
 当前主线最近提交：
 
 ```text
-47e9e7d feat: complete bounded FOFA production loop
+72f83e3 fix: 18 项实测缺陷修复批次（D 包前的最后基线；后续提交见 git log）
 ```
 
 此前重要提交：
@@ -90,7 +90,7 @@ rtk uv run pytest -q
 | R7 | completed (2026-10-04) | 报告十六表、baseline 监控差异、case 验收与 CLI 全链路 |
 
 R2 升级依据（原 `bounded` 升级条件已满足）：R3-R7 的限制、覆盖、预算、归并
-和主动观察能力已全部实现并通过 324 项五类测试；2026-10-04 在授权目标
+和主动观察能力已全部实现并通过 420 项五类测试；2026-10-04 在授权目标
 `www.ceramtec-group.cn` 上完成真实全链 smoke（FOFA 查询/拆批 + 归并 +
 架构门控 + Safe HTTP/Port 主动观察），期间发现并修复 3+1 个真实缺陷。
 真实多页分页与更大范围授权的持续监控仍以单次授权任务为单位执行。
@@ -99,7 +99,7 @@ R2 升级依据（原 `bounded` 升级条件已满足）：R3-R7 的限制、覆
 
 ### 3.1 持久化和状态
 
-SQLite 当前 migration/schema version 为 `7`，包含：
+SQLite 当前 migration/schema version 为 `12`（`state/database.py` `SCHEMA_VERSION = 12`），包含：
 
 ```text
 task

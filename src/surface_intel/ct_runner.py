@@ -9,6 +9,7 @@ from .adapters.capabilities import CapabilityRegistry
 from .adapters.ct import CertificateTransparencyAdapter
 from .ct_client import CrtShClient, FailoverCtClient
 from .execution import AdapterExecutor, ExecutionContext
+from .pacing import configured_rate_limiter
 from .policy.scope import Scope
 from .state.database import Database
 from .state.observations import store_unified_observations
@@ -122,6 +123,7 @@ async def run_ct_search(
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
     context = ExecutionContext(
+        rate_limiter=configured_rate_limiter("ct"),
         task_id=task_id,
         scope_version=scope.scope_version,
         scope_confirmed=True,

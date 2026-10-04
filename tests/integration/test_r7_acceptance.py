@@ -211,3 +211,16 @@ def test_integrity_unknown_explains_pending_actions(tmp_path):
     assert report["integrity_status"] == "unknown"
     assert report["summary"]["planned_actions_pending"] == 1
     assert "planned action" in report["summary"]["integrity_unknown_reason"]
+
+
+def test_zero_action_task_reports_complete_integrity(tmp_path):
+    """D10 姊妹用例：真实 recon 不写 action 行，报告 integrity 应为 complete
+    而非 unknown，且无 unknown 理由。"""
+    scope = Scope(authorized_domains=("example.com",), confirmed=True, scope_version="scope-v1")
+    db = _seed_mergeable(tmp_path, scope, [])
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO task(task_id,status,schema_version,scope_version) VALUES('t3','completed','1.0','scope-v1')")
+    report = build_report(db, "t3", tmp_path / "r3")
+    assert report["integrity_status"] == "complete"
+    assert report["summary"]["integrity_unknown_reason"] is None

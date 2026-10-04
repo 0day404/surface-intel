@@ -18,7 +18,7 @@ R0 能力预检区分 `available`、`degraded`、`not_configured`、`unsupported
 R3.1 增加被动 DNS 入口：`dns-health --real` 只报告 resolver 配置，不查询目标；
 `dns-lookup` 要求 `--real --confirm-real`、已确认范围且域名在范围内。运行把任务
 置为 `collecting_passive`，逐记录类型经统一执行器执行（`adapter_call` 审计 +
-`dns_resolver` 预算），结果以 `completed`/`partial`/`failed` 收口。观察写入现有
+`dns_resolver` 预算，预算 opt-in、默认未接线），结果以 `completed`/`partial`/`failed` 收口。观察写入现有
 evidence/observation 表，带 `source_quality`、`license_status` 和
 `related_scope_status`；DNS 重复执行是合法的重新观察（新时间戳与 TTL），不按
 幂等键跳过。
@@ -26,7 +26,7 @@ evidence/observation 表，带 `source_quality`、`license_status` 和
 R3.2 增加被动 CT 入口：`ct-health --real` 只报告端点配置，不发起网络请求；
 `ct-search` 要求 `--real --confirm-real`、已确认范围且域名在范围内。运行把任务
 置为 `collecting_passive`，单动作经统一执行器执行（`adapter_call` 审计 +
-`ct_log` 预算），结果以 `completed`/`failed`/`blocked` 收口。crt.sh 对大域名可能
+`ct_log` 预算，预算 opt-in、默认未接线），结果以 `completed`/`failed`/`blocked` 收口。crt.sh 对大域名可能
 返回大量证书行：整个响应规范化为一条 observation（证书按行保存 CN/SAN/issuer/
 serial/validity/first_seen/last_seen），原始响应体不落盘。默认端点
 `https://crt.sh/`，可用 `SURFACE_INTEL_CT_ENDPOINT` 覆盖；请求超时默认 30 秒
@@ -42,7 +42,7 @@ serial/validity/first_seen/last_seen），原始响应体不落盘。默认端�
 R3.3 增加被动注册数据入口：`rdap-health --real` 只报告端点配置，不发起网络请求；
 `rdap-lookup` 要求 `--real --confirm-real`、已确认范围且目标在范围内（IP 需在
 授权 IP 列表或 CIDR 内）。运行把任务置为 `collecting_passive`，单动作经统一执行
-器执行（`adapter_call` 审计 + `rdap_lookup` 预算），结果以
+器执行（`adapter_call` 审计 + `rdap_lookup` 预算，预算 opt-in、默认未接线），结果以
 `completed`/`failed`/`blocked` 收口。默认端点 `https://rdap.org/`，可用
 `SURFACE_INTEL_RDAP_ENDPOINT` 覆盖；TLD 无 RDAP 时自动回退 WHOIS（端口 43，
 `whois_text_unverified` 许可标记）；重复执行是合法重新观察。
@@ -68,6 +68,19 @@ delegated 按适配器分组创建租约型 subtask 行再逐组执行。执行�
 `freeze_stale_actions` 冻结旧版本未完结动作（cancelled+scope_version_frozen），
 已完成结果留作历史快照。
 
+0.2.0 起 `RateLimiter` 默认接线：每个真实 runner 经 `pacing.py` 注入限速器
+（默认 ct 2 秒 / rdap 1 秒，其余适配器 0），env
+`SURFACE_INTEL_MIN_INTERVAL_<ADAPTER>`（秒，浮点）可覆盖，非法或负值
+fail-closed（ValueError 带变量名）。限速生命周期为单次 runner 调用（同一
+run 内逐动作生效，如 dns-lookup 的逐记录类型之间），不跨进程持久。限速与
+预算是两回事：预算机制仍 opt-in、默认未接线。
+
+`plan`/`run` 是 Mock 适配器驱动的离线演示闭环（`planning.py` 固定
+`mock_passive`），生产路径是 `recon` 与各真实入口。勿在生产任务上执行
+`plan`——写入的 mock planned 行会让 `report` integrity 停在 `unknown`
+（有 action 行即受 action 维度约束；真实 recon 不写 action 行，
+integrity 不因 action 维度报 unknown）。
+
 `report` 命令同时产出两份交付物：`result.json`/`result.xlsx`（机器可重建
 证据工件，十六表）与 `analyst_report.xlsx`（公司交付模板：域名资产/IP资产/
 站点/服务/组件/登录入口/APP/公众号/小程序/暗网/信息泄露/漏洞汇总 十三张
@@ -82,6 +95,21 @@ R7 编排命令：`recon <task-id> --fofa-query '<q>' [--ct-domain <domain>]
 一次调用完成全域被动收集（FOFA 批次 → CT → 发现主机 DNS → 发现 IP RDAP
 → 归并 → 架构识别），编排逻辑为包内受测模块
 `orchestration/full_recon.py`；容量上限（DNS 主机 20、RDAP IP 5）内建。
+
+范围修订（A1/A2）：`scope-amend <task-id> --add-ips <ip,...>
+[--add-domains <domain,...> [--confirm-new-domain]] [--allow-active
+[--active-level <level>] [--ports <port,...>]] --reason '<why>' --confirm`——
+已发现的候选值自由修订；从未见过的新域名走 `--confirm-new-domain` 显式通道；
+主动授权只升不降（`--allow-active` + 级别/端口）。每次 `--confirm` 在单事务
+落快照 + 任务指针 + 审计事件，并冻结旧版本未完结动作（R5）。`recon` 的
+`--auto-amend-discovered-ips` 对 DNS 新揭示 IP 自动补授权并跑 RDAP。
+
+监控基线：`baseline-save <task-id>` 把当前归并资产集存为 baseline checkpoint；
+`baseline-diff <task-id> [--baseline <checkpoint-id>] [--against <checkpoint-id>]
+[--output <path>]` 对比 latest baseline（缺省）或任意两次 checkpoint 的资产集
+（新增/消失/变化/重现/未变），`--output` 把同一 JSON 写文件。对比只读、纯离线；
+scope 版本不一致会被报告而非静默忽略。baseline checkpoint 不参与 resume
+断点（`latest_checkpoint` 排除 baseline phase）。
 
 R6 真实观察入口（均要求 `--real --confirm-real`、范围开启 active_testing、
 R4 架构门控与 R5 预算/停止在执行器层生效）：

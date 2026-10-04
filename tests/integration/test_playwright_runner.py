@@ -83,8 +83,25 @@ async def test_happy_path_browser_observation_persisted(tmp_path):
     assert payload["source"] == "playwright_mcp"
     assert payload["final_url"] == "https://www.example.com/"
     assert payload["related_scope_status"] == "candidate"
+    # D5 回归锁定：client 产的 http_status/network_summary 真正落库（原恒 None/空）
+    assert payload["status_code"] == 200
+    assert payload["network_summary"] == [
+        {"url": "https://www.example.com/app.js", "status": 200}]
+    assert payload["partial_collection_errors"] == []
     # the browser scope object passes the confirmed domains down
     assert ("https://www.example.com/", ("example.com", "*.example.com"), 100) in client.calls
+
+
+@pytest.mark.asyncio
+async def test_wildcard_scope_completes_full_chain(tmp_path):
+    """D8：全通配 scope 下 runner 门控与 adapter validate 行为一致，不再误拦。"""
+    scope = _active_scope(authorized_domains=("*",))
+    db = _setup(tmp_path, scope)
+    client = StubBrowserClient(_observed())
+    result = await run_browser_observe(db, client, task_id="t", scope=scope,
+                                       url="https://www.example.com/")
+    assert result.status == "completed"
+    assert _payload(db)[0]["status_code"] == 200
 
 
 @pytest.mark.asyncio
