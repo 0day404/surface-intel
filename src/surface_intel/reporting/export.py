@@ -241,6 +241,12 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
     report["export"] = _export_xlsx(output, report, task_id, assets, scope_rows,
                                    asset_relations, asset_conflicts, browser_pages,
                                    browser_network, review_queue, checkpoints)
+    # analyst-facing delivery in the company template; failure isolated from
+    # the machine report exactly like the XLSX path (case-08 semantics)
+    from .analyst_report import build_analyst_report
+
+    analyst_meta = build_analyst_report(db, task_id, report, output)
+    report["export"]["analyst_report"] = analyst_meta
     # export metadata is appended to the JSON after the XLSX attempt; case-08:
     # a failing XLSX never invalidates the already-written JSON main result
     json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")

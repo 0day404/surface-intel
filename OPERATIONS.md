@@ -68,6 +68,15 @@ delegated 按适配器分组创建租约型 subtask 行再逐组执行。执行�
 `freeze_stale_actions` 冻结旧版本未完结动作（cancelled+scope_version_frozen），
 已完成结果留作历史快照。
 
+`report` 命令同时产出两份交付物：`result.json`/`result.xlsx`（机器可重建
+证据工件，十六表）与 `analyst_report.xlsx`（公司交付模板：域名资产/IP资产/
+站点/服务/组件/登录入口/APP/公众号/小程序/暗网/信息泄露/漏洞汇总 十三张
+分析表）。分析列（归属档/用途/依据）按数据自动填充能推导的部分——confirmed
+资产标 A-授权范围、third_party 标 C-第三方、RDAP 国家入 IP 资产、CT SAN 入
+已发现子域、FOFA 标题含登录标记入登录入口（未验证）；需要人工判断的列留
+“—”，未采集领域（APP/公众号/小程序/暗网）显式“未核查”，漏洞结论不自动
+生成（状态=未验证）。
+
 R7 编排命令：`recon <task-id> --fofa-query '<q>' [--ct-domain <domain>]
 [--size n] [--max-pages n] [--max-rdap-ips n] --real --confirm-real`——
 一次调用完成全域被动收集（FOFA 批次 → CT → 发现主机 DNS → 发现 IP RDAP
