@@ -677,8 +677,13 @@ def cmd_browser_observe(args: argparse.Namespace) -> int:
     client = configured_playwright_client(cwd=screenshots_dir)
 
     async def call():
-        return await run_browser_observe(db, client, task_id=args.task_id, scope=scope,
-                                         url=args.url, max_requests=args.max_requests)
+        try:
+            return await run_browser_observe(db, client, task_id=args.task_id, scope=scope,
+                                             url=args.url, max_requests=args.max_requests)
+        finally:
+            # 在事件循环内显式收掉 stdio 子进程，否则退出时留下
+            # unclosed transport 噪声（npx 进程也可能滞留）
+            await client.close()
 
     try:
         result = asyncio.run(call())

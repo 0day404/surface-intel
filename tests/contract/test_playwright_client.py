@@ -155,7 +155,7 @@ def test_configured_client_uses_default_command(monkeypatch):
     from surface_intel.playwright_client import configured_playwright_client
 
     client = configured_playwright_client()
-    assert client.launch_command == "npx -y @playwright/mcp@latest --stdio"
+    assert client.launch_command == "npx -y @playwright/mcp@latest"
 
 
 @pytest.mark.asyncio
@@ -225,3 +225,145 @@ def test_configured_client_passes_cwd_through(monkeypatch, tmp_path):
 
     client = configured_playwright_client(cwd=tmp_path)
     assert client._cwd == str(tmp_path)
+
+
+# --- @playwright/mcp 0.0.83：工具结果是人类可读 Markdown（实测形状 fixture） ---
+
+NAVIGATE_MD = (
+    "### Ran Playwright code\n"
+    "```js\n"
+    "await page.goto('https://www.example.com/');\n"
+    "```\n"
+    "### Page\n"
+    "- Page URL: https://www.example.com/\n"
+    "- Page Title: Example Domain\n"
+    "### Snapshot\n"
+    "- [Snapshot](.playwright-mcp\\page-1.yml)"
+)
+CONSOLE_MD = ("### Result\n"
+              "Total messages: 2 (Errors: 1, Warnings: 1)\n"
+              "\n"
+              "### Page\n"
+              "- Page URL: https://www.example.com/")
+NETWORK_MD = ("### Result\n"
+              "1. [GET] https://www.example.com/ => [200] \n"
+              "2. [GET] https://cdn.thirdparty.net/x.js => [200]")
+SCREENSHOT_MD = ("### Result\n"
+                 "- [Screenshot of viewport](./observation-x.png)\n"
+                 "### Ran Playwright code")
+
+
+class MarkdownMcpTransport(FakeMcpTransport):
+    """模拟 0.0.83：tools/call 一律返回非 JSON 的 Markdown 文本。"""
+
+    def __init__(self, texts=None, error_names=(), tools=None):
+        super().__init__(tools=tools)
+        self.texts = texts or {}
+        self.error_names = set(error_names)
+
+    async def request(self, method, params=None):
+        if method == "tools/call":
+            self.calls.append((method, params))
+            name = params.get("name")
+            if name in self.texts:
+                envelope = {"content": [{"type": "text", "text": self.texts[name]}]}
+                if name in self.error_names:
+                    envelope["isError"] = True
+                return {"result": envelope}
+            return {"result": {"content": [{"type": "text", "text": "### Result\n"}]}}
+        return await super().request(method, params)
+
+
+@pytest.mark.asyncio
+async def test_markdown_responses_are_parsed(tmp_path):
+    transport = MarkdownMcpTransport({
+        "browser_navigate": NAVIGATE_MD,
+        "browser_console_messages": CONSOLE_MD,
+        "browser_network_requests": NETWORK_MD,
+        "browser_take_screenshot": SCREENSHOT_MD,
+    })
+    client = PlaywrightMcpClient(transport=transport, cwd=tmp_path)
+    outcome = await client.observe_public_page(
+        "https://www.example.com/", scope_domains=("example.com",))
+    assert outcome["status"] == "observed"
+    assert outcome["final_url"] == "https://www.example.com/"
+    assert outcome["title"] == "Example Domain"
+    assert outcome["console_error_count"] == 1
+    # 0.0.83 的 navigate 不暴露 HTTP 状态码——如实为 None，不编造
+    assert outcome["http_status"] is None
+    # 编号行解析出 method/url/status，第三方 origin 可判定
+    assert outcome["network_summary"] == [
+        {"url": "https://www.example.com/", "method": "GET", "status": 200},
+        {"url": "https://cdn.thirdparty.net/x.js", "method": "GET", "status": 200},
+    ]
+    assert outcome["third_party_origins"] == ["cdn.thirdparty.net"]
+    # 链接目标 ./observation-x.png 相对 cwd 解析
+    assert outcome["screenshot_ref"] == str(tmp_path / "observation-x.png")
+    assert outcome["partial_collection_errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_network_requests_request_static_option():
+    transport = MarkdownMcpTransport({"browser_navigate": NAVIGATE_MD})
+    client = PlaywrightMcpClient(transport=transport)
+    await client.observe_public_page("https://www.example.com/")
+    # 0.0.83 默认隐藏静态请求（连文档请求都不显示），必须带 static
+    network_call = [c for c in transport.calls
+                    if c[0] == "tools/call" and c[1]["name"] == "browser_network_requests"][0]
+    assert network_call[1]["arguments"] == {"static": True}
+
+
+@pytest.mark.asyncio
+async def test_unparsed_markdown_is_recorded_not_swallowed():
+    transport = MarkdownMcpTransport({
+        "browser_navigate": NAVIGATE_MD,
+        "browser_console_messages": "### Result\nsomething unrecognized",
+        "browser_network_requests": NETWORK_MD,
+        "browser_take_screenshot": SCREENSHOT_MD,
+    })
+    client = PlaywrightMcpClient(transport=transport)
+    outcome = await client.observe_public_page("https://www.example.com/")
+    assert outcome["status"] == "observed"
+    assert outcome["partial_collection_errors"] == ["console:FofaClientError"]
+    assert outcome["console_error_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_is_error_envelope_fails_navigation():
+    transport = MarkdownMcpTransport(
+        {"browser_navigate": "### Result\nNavigation failed with TimeoutError"},
+        error_names=("browser_navigate",))
+    client = PlaywrightMcpClient(transport=transport)
+    outcome = await client.observe_public_page("https://www.example.com/")
+    assert outcome["status"] == "failed"
+    assert outcome["error_type"] == "mcp_error:FofaClientError"
+
+
+@pytest.mark.asyncio
+async def test_is_error_envelope_records_partial_error():
+    transport = MarkdownMcpTransport(
+        {"browser_navigate": NAVIGATE_MD,
+         "browser_console_messages": CONSOLE_MD,
+         "browser_network_requests": NETWORK_MD,
+         "browser_take_screenshot": "### Result\nScreenshot refused"},
+        error_names=("browser_take_screenshot",))
+    client = PlaywrightMcpClient(transport=transport)
+    outcome = await client.observe_public_page("https://www.example.com/")
+    assert outcome["status"] == "observed"
+    assert outcome["partial_collection_errors"] == ["screenshot:FofaClientError"]
+    assert outcome["screenshot_ref"] is None
+
+
+@pytest.mark.asyncio
+async def test_screenshot_filename_argument_carries_png_extension(tmp_path):
+    transport = MarkdownMcpTransport({
+        "browser_navigate": NAVIGATE_MD,
+        "browser_take_screenshot": SCREENSHOT_MD,
+    })
+    client = PlaywrightMcpClient(transport=transport, cwd=tmp_path)
+    await client.observe_public_page("https://www.example.com/")
+    shot_call = [c for c in transport.calls
+                 if c[0] == "tools/call" and c[1]["name"] == "browser_take_screenshot"][0]
+    # 0.0.83 按字面使用 filename（不补扩展名）
+    assert shot_call[1]["arguments"]["filename"].endswith(".png")
+    assert shot_call[1]["arguments"]["filename"].startswith("observation-2")

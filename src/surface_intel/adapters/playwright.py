@@ -90,7 +90,10 @@ class PlaywrightAdapter:
             }],
             evidence_refs=result.get("evidence_refs", []),
             request_id=result.get("request_id"),
-            error=result.get("error") if action_status == ActionStatus.FAILED.value else None,
+            # client 失败负载用的是 error_type（not_configured/mcp_error:*）——
+            # 原来只读 error，导致 run 报 failed 却 error=null
+            error=(result.get("error") or result.get("error_type"))
+            if action_status == ActionStatus.FAILED.value else None,
         )
 
     async def cancel(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:

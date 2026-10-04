@@ -47,6 +47,29 @@ def unwrap_mcp_result(response: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _windows_spawn_argv(argv: list[str]) -> list[str]:
+    """Windows: batch shims (npx.cmd / .bat) cannot be exec'd directly.
+
+    asyncio's create_subprocess_exec goes through CreateProcess, which only
+    runs real executables - spawning "npx" raises FileNotFoundError. When the
+    PATH-resolved shim is a batch file, prefer driving node against npm's
+    npx-cli.js (no shell quoting pitfalls); cmd.exe /d /s /c is the fallback.
+    """
+    if os.name != "nt":
+        return argv
+    import shutil
+
+    resolved = shutil.which(argv[0])
+    if not resolved or not resolved.lower().endswith((".cmd", ".bat")):
+        return argv
+    shim_root = os.path.dirname(os.path.dirname(resolved))
+    npx_cli = os.path.join(shim_root, "node_modules", "npm", "bin", "npx-cli.js")
+    node = shutil.which("node")
+    if node and os.path.isfile(npx_cli):
+        return [node, npx_cli, *argv[1:]]
+    return ["cmd.exe", "/d", "/s", "/c", *argv]
+
+
 class StdioJsonRpcTransport:
     def __init__(
         self,
@@ -69,8 +92,9 @@ class StdioJsonRpcTransport:
             return
         if not self.command:
             raise FofaNotConfiguredError("fofa_command_not_configured")
+        argv = _windows_spawn_argv(list(self.command))
         self.process = await asyncio.create_subprocess_exec(
-            *self.command,
+            *argv,
             cwd=self.cwd,
             env=self.env,
             stdin=asyncio.subprocess.PIPE,
