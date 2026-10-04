@@ -68,6 +68,12 @@ delegated 按适配器分组创建租约型 subtask 行再逐组执行。执行�
 `freeze_stale_actions` 冻结旧版本未完结动作（cancelled+scope_version_frozen），
 已完成结果留作历史快照。
 
+R7 编排命令：`recon <task-id> --fofa-query '<q>' [--ct-domain <domain>]
+[--size n] [--max-pages n] [--max-rdap-ips n] --real --confirm-real`——
+一次调用完成全域被动收集（FOFA 批次 → CT → 发现主机 DNS → 发现 IP RDAP
+→ 归并 → 架构识别），编排逻辑为包内受测模块
+`orchestration/full_recon.py`；容量上限（DNS 主机 20、RDAP IP 5）内建。
+
 R6 真实观察入口（均要求 `--real --confirm-real`、范围开启 active_testing、
 R4 架构门控与 R5 预算/停止在执行器层生效）：
 `http-observe <task-id> --url <url> [--method GET|HEAD]`——低影响 GET/HEAD，

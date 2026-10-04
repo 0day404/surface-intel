@@ -49,7 +49,9 @@ P1（工作流缺陷）/ P2（已知限制）分级。每项修复完成后在�
 - 修复意见：编排提升为包内受测模块 `orchestration/full_recon.py`
   （`run_full_passive_recon()`），driver 退化为薄参数入口；五源顺序、
   json_extract 查询、发现回填全部有测试覆盖。
-- [ ] 未修复——独立增量排期（编排提升为受测模块工作量较大）
+- [x] 已修复（2026-10-04）：编排提升为 `orchestration/full_recon.py` 的
+      `run_full_passive_recon()`（五源顺序、发现回填、json_extract 查询、
+      容量上限全部受测）；CLI 新增 `recon` 命令；+4 测试（339 passed）
 
 ### P1-6 integrity=unknown 语义混淆
 - 现象：fofa-search/direct-runner 不消耗 plan 动作，报告 integrity 恒为
