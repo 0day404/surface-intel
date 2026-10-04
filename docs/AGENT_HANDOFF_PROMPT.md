@@ -3,16 +3,20 @@
 你现在接管的是一个长期工程项目。请把本文作为当前任务的最高优先级上下文，
 并在开始修改前阅读以下文件：
 
+> 路径约定：`<REPO_ROOT>` = 本仓库根（本文件所在仓库的顶层目录）；
+> `<FOFA_MCP_ROOT>` = 独立 fofa-mcp 项目根（解析顺序：env
+> `SURFACE_INTEL_FOFA_ROOT` > 本仓库同级 `fofa-mcp/` > 历史路径
+> `E:\Work\Copilot\fofa-mcp`）。本仓库可整体迁移，位置不固定。
+
 ```text
-E:\Work\Copilot\RECON-ORCHESTRATOR-PLAN.md
-E:\Work\Copilot\surface-intel\README.md
-E:\Work\Copilot\surface-intel\ARCHITECTURE.md
-E:\Work\Copilot\surface-intel\SCHEMA.md
-E:\Work\Copilot\surface-intel\ADAPTERS.md
-E:\Work\Copilot\surface-intel\OPERATIONS.md
-E:\Work\Copilot\surface-intel\SECURITY.md
-E:\Work\Copilot\surface-intel\docs\REAL_COLLECTION_TASK_PLAN.md
-E:\Work\Copilot\surface-intel\docs\checkpoints\
+<REPO_ROOT>\README.md
+<REPO_ROOT>\ARCHITECTURE.md
+<REPO_ROOT>\SCHEMA.md
+<REPO_ROOT>\ADAPTERS.md
+<REPO_ROOT>\OPERATIONS.md
+<REPO_ROOT>\SECURITY.md
+<REPO_ROOT>\docs\REAL_COLLECTION_TASK_PLAN.md
+<REPO_ROOT>\docs\checkpoints\
 ```
 
 ## 1. 项目身份和最终目标
@@ -20,7 +24,7 @@ E:\Work\Copilot\surface-intel\docs\checkpoints\
 项目路径：
 
 ```text
-E:\Work\Copilot\surface-intel
+<REPO_ROOT>
 ```
 
 这是一个独立的 `surface-intel` Skill/Coordinator，用于在明确授权范围内执行
@@ -29,7 +33,7 @@ E:\Work\Copilot\surface-intel
 独立 FOFA MCP 项目：
 
 ```text
-E:\Work\Copilot\fofa-mcp
+<FOFA_MCP_ROOT>
 ```
 
 `surface-intel` 只能通过 Adapter 和 MCP stdio 客户端调用 FOFA。绝对不能复制、
@@ -67,7 +71,7 @@ b417e8b fix: complete authorized FOFA smoke test path
 接管时先执行：
 
 ```powershell
-Set-Location E:\Work\Copilot\surface-intel
+Set-Location <REPO_ROOT>
 rtk git status --short
 rtk uv run pytest -q
 ```
@@ -163,7 +167,7 @@ src\surface_intel\fofa_client.py
 
 ```text
 uv run fofa-mcp
-cwd = E:\Work\Copilot\fofa-mcp
+cwd = <FOFA_MCP_ROOT>
 ```
 
 FOFA 支持的工具：
@@ -260,7 +264,7 @@ batch = fofa-batch-7e50b596bb344fef
 运行示例：
 
 ```powershell
-Set-Location E:\Work\Copilot\surface-intel
+Set-Location <REPO_ROOT>
 rtk uv run surface-intel fofa-health --real
 rtk uv run surface-intel fofa-search `
   --task-root .\runtime\ceramtec-fofa-20261003 `
@@ -299,7 +303,7 @@ rtk uv run surface-intel fofa-search `
 
 ## 6. MCP 修改审批规则
 
-如果运行中确认问题来自 `E:\Work\Copilot\fofa-mcp` 或其他外部 MCP，而不是
+如果运行中确认问题来自 `<FOFA_MCP_ROOT>` 或其他外部 MCP，而不是
 `surface-intel` 的调用、适配器或状态逻辑：
 
 1. 先明确指出 MCP 项目、文件、接口和根因；
@@ -383,7 +387,7 @@ WHOIS fallback 必须明确数据质量和数据许可状态。不能因为组�
 标准验证命令：
 
 ```powershell
-Set-Location E:\Work\Copilot\surface-intel
+Set-Location <REPO_ROOT>
 rtk uv sync --extra dev
 rtk uv run pytest -q
 rtk git diff --check

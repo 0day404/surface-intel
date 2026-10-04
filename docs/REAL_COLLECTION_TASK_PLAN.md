@@ -2,7 +2,7 @@
 
 **版本**：1.0  
 **日期**：2026-10-03  
-**适用项目**：`E:\Work\Copilot\surface-intel`  
+**适用项目**：`<REPO_ROOT>`（本仓库，可整体迁移）  
 **依据**：`E:\Work\Copilot\RECON-ORCHESTRATOR-PLAN.md`  
 **目标**：在不降低授权、安全、审计和恢复约束的前提下，把当前离线 MVP
 推进为可用于明确授权目标的、可追溯且有界的真实多源信息收集系统。
@@ -578,7 +578,7 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 建议使用的最小验证命令：
 
 ```powershell
-cd E:\Work\Copilot\surface-intel
+cd <REPO_ROOT>
 uv sync --extra dev
 uv run pytest
 uv run surface-intel init .\var\task-root

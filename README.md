@@ -31,7 +31,9 @@ uv run surface-intel fofa-search --task-root .\task <task-id> --domain example.c
 ```
 
 查询命令要求任务范围已确认、域名在授权范围内，并通过独立
-`E:\Work\Copilot\fofa-mcp` 的 stdio MCP 进程调用；凭据只由 FOFA MCP 自己从其
+fofa-mcp 项目的 stdio MCP 进程调用（部署位置三级解析：env
+`SURFACE_INTEL_FOFA_ROOT` > 本项目同级 `fofa-mcp/` 目录 > 历史固定
+路径 `E:\Work\Copilot\fofa-mcp`）；凭据只由 FOFA MCP 自己从其
 受控环境读取，不进入 `surface-intel` 参数、SQLite 或报告。未配置或连接失败时
 返回 `not_configured`/失败状态，不伪造结果。
 
@@ -99,4 +101,4 @@ uv run surface-intel init .\task
 ```
 
 未确认授权范围的任务会进入 `awaiting_scope`，`validate` 返回非零状态并禁止外部调用。
-FOFA 仅会通过后续的独立适配器引用 `E:\Work\Copilot\fofa-mcp`，不会复制或修改该项目。
+FOFA 仅会通过后续的独立适配器引用 fofa-mcp 项目（位置解析见上文），不会复制或修改该项目。

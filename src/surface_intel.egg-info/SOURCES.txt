@@ -56,6 +56,7 @@ src/surface_intel/policy/scope.py
 src/surface_intel/policy/scope_amend.py
 src/surface_intel/reporting/__init__.py
 src/surface_intel/reporting/analyst_report.py
+src/surface_intel/reporting/diff_report.py
 src/surface_intel/reporting/export.py
 src/surface_intel/reporting/merged.py
 src/surface_intel/state/__init__.py
