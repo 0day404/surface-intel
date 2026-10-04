@@ -548,6 +548,24 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
     if not args.real or not args.confirm_real:
         print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
         return 2
+    targets_file = getattr(args, "targets", None)
+    if targets_file and args.url:
+        print(json.dumps({"ok": False, "error": "url_and_targets_mutually_exclusive"}))
+        return 2
+    if targets_file:
+        db = Database(_config(args).database_path)
+        db.initialize()
+        scope_row = next(db.rows(
+            "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
+        ), None)
+        if scope_row is None or not scope_row["confirmed"]:
+            print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
+            return 2
+        scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+        return _http_observe_batch(db, scope, args, _read_targets_file(targets_file))
+    if not args.url:
+        print(json.dumps({"ok": False, "error": "url_or_targets_required"}))
+        return 2
     db = Database(_config(args).database_path)
     db.initialize()
     scope_row = next(db.rows(
@@ -592,12 +610,91 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
     return 0 if result.status == "completed" else 2
 
 
+def _read_targets_file(path: str) -> list[str]:
+    """B6: targets.txt——每行一条,空行与 # 注释行跳过。"""
+    entries = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            entry = line.strip()
+            if entry and not entry.startswith("#"):
+                entries.append(entry)
+    return entries
+
+
+def _http_observe_batch(db, scope, args: argparse.Namespace, targets: list[str]) -> int:
+    """B6: 批量 http-observe——串行逐台(不并发轰目标),单台失败不中断,
+    结果逐台入 results;退出码 0=全部 completed,1=存在失败。"""
+    from surface_intel.safe_http_client import SafeHttpFetchClient
+    from surface_intel.safe_http_runner import run_http_observe
+
+    if not targets:
+        print(json.dumps({"ok": False, "error": "targets_empty"}))
+        return 2
+    if not scope.active_testing_allowed or scope.active_testing_level.value == "passive_only":
+        print(json.dumps({"ok": False, "error": "active_testing_not_authorized"}))
+        return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.PROBING_AUTHORIZED.value, args.task_id),
+        )
+    client = SafeHttpFetchClient()
+    results: list[dict] = []
+
+    async def run_batch():
+        for entry in targets:
+            url = entry if "://" in entry else "https://" + entry
+            host = (urlsplit(url).hostname or "").lower()
+            if not host or not scope.is_in_scope(host):
+                results.append({"target": entry, "status": "failed",
+                                "error": "target_out_of_scope"})
+                continue
+            try:
+                result = await run_http_observe(
+                    db, client, task_id=args.task_id, scope=scope, url=url,
+                    method=args.method,
+                    allow_hosted_third_party=getattr(args, "allow_hosted_third_party", False))
+                results.append({"target": url, "status": result.status,
+                                "observations": result.observations,
+                                "error": result.error,
+                                "override_used": result.override_used})
+            except Exception as exc:
+                results.append({"target": url, "status": "failed",
+                                "error": type(exc).__name__})
+
+    asyncio.run(run_batch())
+    completed = sum(1 for r in results if r["status"] == "completed")
+    failed = len(results) - completed
+    print(json.dumps({"ok": failed == 0, "total": len(results),
+                      "completed": completed, "failed": failed,
+                      "results": results}, ensure_ascii=True))
+    return 0 if failed == 0 else 1
+
+
 def cmd_port_check(args: argparse.Namespace) -> int:
     from surface_intel.safe_port_client import SafePortProbeClient
     from surface_intel.safe_port_runner import run_port_check
 
     if not args.real or not args.confirm_real:
         print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
+        return 2
+    targets_file = getattr(args, "targets", None)
+    if targets_file and (args.target or args.port is not None):
+        print(json.dumps({"ok": False, "error": "single_target_and_targets_mutually_exclusive"}))
+        return 2
+    if targets_file:
+        db = Database(_config(args).database_path)
+        db.initialize()
+        scope_row = next(db.rows(
+            "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
+        ), None)
+        if scope_row is None or not scope_row["confirmed"]:
+            print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
+            return 2
+        scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
+        return _port_check_batch(db, scope, args, _read_targets_file(targets_file))
+    if not args.target or args.port is None:
+        print(json.dumps({"ok": False, "error": "target_and_port_required"}))
         return 2
     db = Database(_config(args).database_path)
     db.initialize()
@@ -641,6 +738,60 @@ def cmd_port_check(args: argparse.Namespace) -> int:
         "override_used": result.override_used,
     }, ensure_ascii=True))
     return 0 if result.status == "completed" else 2
+
+
+def _port_check_batch(db, scope, args: argparse.Namespace, targets: list[str]) -> int:
+    """B6: 批量 port-check——行格式 host:port(缺格式该行记
+    invalid_target_format),串行逐台,失败不中断。"""
+    from surface_intel.safe_port_client import SafePortProbeClient
+    from surface_intel.safe_port_runner import run_port_check
+
+    if not targets:
+        print(json.dumps({"ok": False, "error": "targets_empty"}))
+        return 2
+    if not scope.active_testing_allowed or scope.active_testing_level.value == "passive_only":
+        print(json.dumps({"ok": False, "error": "active_testing_not_authorized"}))
+        return 2
+    with db.connect() as connection:
+        connection.execute(
+            "UPDATE task SET status=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (TaskStatus.PROBING_AUTHORIZED.value, args.task_id),
+        )
+    client = SafePortProbeClient()
+    results: list[dict] = []
+
+    async def run_batch():
+        for entry in targets:
+            host_part, _, port_part = entry.rpartition(":")
+            if not host_part or not port_part.isdigit():
+                results.append({"target": entry, "status": "failed",
+                                "error": "invalid_target_format"})
+                continue
+            host = host_part.strip().lower().rstrip(".")
+            if not host or not scope.is_in_scope(host):
+                results.append({"target": entry, "status": "failed",
+                                "error": "target_out_of_scope"})
+                continue
+            try:
+                result = await run_port_check(
+                    db, client, task_id=args.task_id, scope=scope, target=host,
+                    port=int(port_part),
+                    allow_hosted_third_party=getattr(args, "allow_hosted_third_party", False))
+                results.append({"target": entry, "status": result.status,
+                                "observations": result.observations,
+                                "error": result.error,
+                                "override_used": result.override_used})
+            except Exception as exc:
+                results.append({"target": entry, "status": "failed",
+                                "error": type(exc).__name__})
+
+    asyncio.run(run_batch())
+    completed = sum(1 for r in results if r["status"] == "completed")
+    failed = len(results) - completed
+    print(json.dumps({"ok": failed == 0, "total": len(results),
+                      "completed": completed, "failed": failed,
+                      "results": results}, ensure_ascii=True))
+    return 0 if failed == 0 else 1
 
 
 def cmd_browser_observe(args: argparse.Namespace) -> int:
@@ -742,6 +893,58 @@ def cmd_baseline_diff(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": True, "task_id": args.task_id, "output": str(out)}))
     else:
         print(json.dumps(payload, ensure_ascii=True))
+    return 0
+
+
+def cmd_diff_report(args: argparse.Namespace) -> int:
+    """B7: 差量复查一页——baseline-diff 的 markdown 单页渲染并落盘。
+
+    缺省对比 latest baseline vs 当前资产集;--baseline/--against 指定
+    checkpoint 对(地基=diff_checkpoints)。缺省落 reports/<task-id>/,
+    输出全量列出,不截断。
+    """
+    from datetime import datetime, timezone
+
+    from surface_intel.monitor import diff_against_baseline, diff_checkpoints
+    from surface_intel.reporting.diff_report import render_diff_report
+
+    db = Database(_config(args).database_path)
+    db.initialize()
+    task = next(db.rows("SELECT scope_version FROM task WHERE task_id=?", (args.task_id,)), None)
+    if task is None:
+        print(json.dumps({"ok": False, "error": "task_not_found"}))
+        return 2
+    if getattr(args, "baseline", None):
+        baseline_label = f"checkpoint {args.baseline}"
+        against_label = (f"checkpoint {args.against}"
+                         if getattr(args, "against", None) else "当前资产集")
+        try:
+            diff = diff_checkpoints(db, args.task_id, args.baseline,
+                                    getattr(args, "against", None))
+        except ValueError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}))
+            return 2
+    else:
+        baseline_label = "latest baseline"
+        against_label = "当前资产集"
+        diff = diff_against_baseline(db, args.task_id, task["scope_version"])
+    generated_at = datetime.now(timezone.utc).isoformat()
+    markdown = render_diff_report(diff, task_id=args.task_id,
+                                  baseline_label=baseline_label,
+                                  against_label=against_label,
+                                  generated_at=generated_at)
+    output_path = getattr(args, "output", None)
+    if output_path:
+        out = Path(output_path)
+    else:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out = _config(args).task_root / "reports" / args.task_id / f"diff-report-{stamp}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(markdown, encoding="utf-8")
+    print(json.dumps({"ok": True, "task_id": args.task_id, "output": str(out),
+                      "added": len(diff.added), "disappeared": len(diff.disappeared),
+                      "changed": len(diff.changed), "reappeared": len(diff.reappeared),
+                      "unchanged": diff.unchanged}, ensure_ascii=True))
     return 0
 
 
@@ -962,7 +1165,7 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("baseline-save", cmd_baseline_save), ("baseline-diff", cmd_baseline_diff), ("scope-amend", cmd_scope_amend), ("recon", cmd_recon), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("baseline-save", cmd_baseline_save), ("baseline-diff", cmd_baseline_diff), ("scope-amend", cmd_scope_amend), ("recon", cmd_recon), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate), ("diff-report", cmd_diff_report)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -1009,7 +1212,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--confirm-real", action="store_true")
         if name == "http-observe":
             command.add_argument("task_id")
-            command.add_argument("--url", required=True)
+            # B6: --url 与 --targets 二选一(批量为 targets.txt,每行一个 URL/host)
+            command.add_argument("--url", required=False, default=None)
+            command.add_argument("--targets", default=None)
             command.add_argument("--method", default="GET", choices=("GET", "HEAD"))
             # A4: company sites hosted on third-party ranges - explicit override
             command.add_argument("--allow-hosted-third-party", dest="allow_hosted_third_party",
@@ -1018,8 +1223,10 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--confirm-real", action="store_true")
         if name == "port-check":
             command.add_argument("task_id")
-            command.add_argument("--target", required=True)
-            command.add_argument("--port", type=int, required=True)
+            # B6: 批量模式行格式 host:port;单目标仍用 --target/--port
+            command.add_argument("--target", required=False, default=None)
+            command.add_argument("--port", type=int, required=False, default=None)
+            command.add_argument("--targets", default=None)
             command.add_argument("--allow-hosted-third-party", dest="allow_hosted_third_party",
                                  action="store_true")
             command.add_argument("--real", action="store_true")
@@ -1058,13 +1265,18 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--merge", nargs="+", dest="merge_tasks")
             # C3: explicit opt-in - restore redaction_map plaintexts into deliverables
             command.add_argument("--reveal-emails", action="store_true")
-        if name in {"status", "validate", "preflight", "plan", "run", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "scope-amend"}:
+        if name in {"status", "validate", "preflight", "plan", "run", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "diff-report", "scope-amend"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")
             command.add_argument("--reason", default="")
         if name == "baseline-diff":
             # D11: 任意两次 checkpoint 对比 + diff 结果导出（缺省=latest baseline vs 当前）
+            command.add_argument("--baseline", default=None)
+            command.add_argument("--against", default=None)
+            command.add_argument("--output", default=None)
+        if name == "diff-report":
+            # B7: 差量复查一页(markdown 落盘;缺省 latest baseline vs 当前资产集)
             command.add_argument("--baseline", default=None)
             command.add_argument("--against", default=None)
             command.add_argument("--output", default=None)

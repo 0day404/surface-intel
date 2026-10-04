@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Iterator
 
@@ -20,7 +21,10 @@ class Database:
         return connection
 
     def initialize(self) -> None:
-        with self.connect() as db:
+        # closing() 在 commit 之后确定性 close 连接——sqlite3.Connection 的
+        # with 语义只 commit 不 close,泄漏的连接会让 WAL 的 checkpoint 时机
+        # 落在 GC 上,读侧(尤其跨连接)可见性随之不确定
+        with closing(self.connect()) as db, db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_version (
@@ -328,7 +332,7 @@ class Database:
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (12)")
 
     def health(self) -> dict[str, object]:
-        with self.connect() as db:
+        with closing(self.connect()) as db, db:
             foreign_keys = db.execute("PRAGMA foreign_keys").fetchone()[0]
             version = db.execute(
                 "SELECT MAX(version) FROM schema_version"
@@ -341,5 +345,5 @@ class Database:
             }
 
     def rows(self, query: str, params: tuple = ()) -> Iterator[sqlite3.Row]:
-        with self.connect() as db:
+        with closing(self.connect()) as db, db:
             yield from db.execute(query, params).fetchall()
