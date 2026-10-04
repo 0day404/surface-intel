@@ -102,6 +102,25 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
     assets_by_type: dict[str, int] = {}
     for row in assets:
         assets_by_type[row["asset_type"]] = assets_by_type.get(row["asset_type"], 0) + 1
+    # retrospective P0-2: deduplicate certificate observations per
+    # (common_name, issuer, not_after) - re-observations are legitimate but
+    # must not read as extra certificates; raw rows stay in observations
+    certificates: list[dict] = []
+    seen_certs: dict[tuple, dict] = {}
+    for row in observations:
+        if row["source"] != "ct_log":
+            continue
+        try:
+            payload = json.loads(row["payload_json"])
+        except json.JSONDecodeError:
+            continue
+        for cert in payload.get("certificates", []):
+            key = (cert.get("common_name"), cert.get("issuer"), cert.get("not_after"))
+            if key not in seen_certs:
+                entry = {**cert, "observation_count": 0}
+                seen_certs[key] = entry
+                certificates.append(entry)
+            seen_certs[key]["observation_count"] += 1
     browser_pages = [dict(row) for row in observations if row["source"] == "playwright_mcp"]
     try:
         browser_network = [
@@ -140,6 +159,11 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
             "gap_count": len(gaps),
             "budget_lines": len(budgets),
             "budget_consumed_units": sum(row["consumed_units"] for row in budgets),
+            "planned_actions_pending": pending_actions,
+            "integrity_unknown_reason": (
+                f"{pending_actions} planned action(s) were never executed - direct "
+                "runner commands bypass the plan loop" if integrity_status == "unknown"
+                and pending_actions else None),
             "stop_events": stop_events,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
@@ -172,6 +196,7 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         "assets": assets,
         "services": [row for row in assets if row["asset_type"] == "service"],
         "domains_certificates": [row for row in assets if row["asset_type"] == "domain"],
+        "certificates": certificates,
         "web_stack": [
             {"asset_id": row["asset_id"], "normalized_value": row["normalized_value"],
              "architecture_status": row["architecture_status"],

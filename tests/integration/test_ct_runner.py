@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from surface_intel.ct_client import CrtShClient, CrtlogsDevClient, FailoverCtClient
 from surface_intel.ct_runner import run_ct_search
 from surface_intel.policy.scope import Scope
 from surface_intel.state.database import Database
@@ -140,3 +141,53 @@ async def test_actions_audited_in_adapter_call_table(tmp_path):
     assert len(calls) == 1
     assert calls[0]["adapter_name"] == "ct_log"
     assert calls[0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_bare_crtsh_client_gains_failover_via_ensure(tmp_path):
+    """Retrospective P0-1: ensure_failover wraps a bare CrtShClient; the
+    caller keeps its original object but the returned chain holds."""
+    from surface_intel.ct_client import CrtlogsDevClient, FailoverCtClient
+    from surface_intel.ct_runner import ensure_failover
+
+    real_client = CrtShClient(timeout=7.5)
+    chain = ensure_failover(real_client)
+    assert isinstance(chain, FailoverCtClient)
+    assert chain._primary is real_client
+    assert isinstance(chain._fallback, CrtlogsDevClient)
+    assert chain._fallback.timeout == 7.5  # timeout carried over
+    # idempotent: wrapping the chain again returns it unchanged
+    assert ensure_failover(chain) is chain
+
+
+@pytest.mark.asyncio
+async def test_primary_failure_falls_back_to_injected_client(tmp_path):
+    """Behavioral: when the bare primary 502s, the injected fallback answers
+    and the run still completes."""
+    from surface_intel.ct_client import CrtShClient
+    from surface_intel.ct_runner import run_ct_search
+
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    failing_primary = CrtShClient(fetch=lambda url, timeout: (_ for _ in ()).throw(
+        __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "u", 502, "bad gateway", None, None)))
+    class StubFallback:
+        def __init__(self):
+            self.calls = []
+
+        async def search(self, domain):
+            self.calls.append(domain)
+            return {"status": "observed", "log_source": "ctlogs.dev", "certificates": []}
+
+    fallback = StubFallback()
+    result = await run_ct_search(db, failing_primary, task_id="t", scope=scope,
+                                 domain="www.example.com",
+                                 failover_client=fallback)
+    assert result.status == "completed"
+    assert result.observations == 1
+    assert fallback.calls == ["www.example.com"]
+    payload = _payload(db)[0]
+    assert payload["log_source"] == "ctlogs.dev"
+
+

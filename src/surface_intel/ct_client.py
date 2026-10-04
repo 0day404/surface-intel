@@ -54,6 +54,10 @@ class CrtShClient(CtLogClient):
     def endpoint(self) -> str:
         return self._endpoint
 
+    @property
+    def timeout(self) -> float:
+        return self._timeout
+
     async def health(self) -> dict[str, Any]:
         return {
             "ok": bool(self._endpoint.startswith("http")),
@@ -221,6 +225,10 @@ class CrtlogsDevClient(CtLogClient):
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
+
+    @property
+    def timeout(self) -> float:
+        return self._timeout
 
     async def health(self) -> dict[str, Any]:
         return {

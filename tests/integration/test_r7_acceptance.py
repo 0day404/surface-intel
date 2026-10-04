@@ -170,3 +170,44 @@ def test_cli_full_chain_init_to_report_on_clean_dir(tmp_path, capsys):
     main(["baseline-diff", "--task-root", str(tmp_path), task_id])
     diff = json.loads(capsys.readouterr().out)
     assert diff["ok"] is True and diff["scope_version_match"] is True
+
+
+def test_certificates_deduped_by_identity_with_observation_count(tmp_path):
+    """Retrospective P0-2: re-observed certificates collapse to one row per
+    (common_name, issuer, not_after) with an observation_count; the raw
+    observations are untouched."""
+    scope = Scope(authorized_domains=("example.com",), confirmed=True, scope_version="scope-v1")
+    cert = {"common_name": "www.example.com", "sans": ["www.example.com"],
+            "issuer": "Sectigo", "serial": "aa", "not_before": "n", "not_after": "x",
+            "first_seen": "f", "last_seen": "l", "log_id": 1, "log_source": "crt.sh"}
+    db = _seed_mergeable(tmp_path, scope, [
+        # the same certificate observed twice (legal re-observation)
+        {"source": "ct_log", "target": "example.com", "status": "observed",
+         "certificates": [cert]},
+        {"source": "ct_log", "target": "example.com", "status": "observed",
+         "certificates": [dict(cert, log_id=2)]},
+    ])
+    merge_task_observations(db, "t", scope)
+    report = build_report(db, "t", tmp_path / "reports")
+    certs = report["certificates"]
+    assert len(certs) == 1  # deduped, not 2 rows
+    assert certs[0]["observation_count"] == 2
+    # raw observations keep every row (immutability principle)
+    assert sum(1 for o in report["observations"] if o["source"] == "ct_log") == 2
+
+
+def test_integrity_unknown_explains_pending_actions(tmp_path):
+    """P1-6: direct-runner tasks carry pending planned actions; the report
+    must say WHY integrity is unknown instead of a bare status."""
+    scope = Scope(authorized_domains=("example.com",), confirmed=True, scope_version="scope-v1")
+    db = _seed_mergeable(tmp_path, scope, [])
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO task(task_id,status,schema_version,scope_version) VALUES('t2','completed','1.0','scope-v1')")
+        connection.execute(
+            """INSERT INTO action(action_id,task_id,idempotency_key,adapter,status,scope_version,phase,input_json)
+               VALUES('act-p','t2','kp','mock_passive','planned','scope-v1','collecting_passive','{}')""")
+    report = build_report(db, "t2", tmp_path / "r")
+    assert report["integrity_status"] == "unknown"
+    assert report["summary"]["planned_actions_pending"] == 1
+    assert "planned action" in report["summary"]["integrity_unknown_reason"]

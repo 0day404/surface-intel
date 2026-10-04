@@ -106,7 +106,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_preflight(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
-    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)), None)
+    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)), None)
     if task is None or scope_row is None:
         print(json.dumps({"ok": False, "error": "task_not_found"}))
         return 2
@@ -127,7 +127,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 def cmd_plan(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
-    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)), None)
+    scope_row = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)), None)
     if task is None or scope_row is None:
         print(json.dumps({"ok": False, "error": "task_not_found"}))
         return 2
@@ -185,7 +185,7 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
     db.initialize()
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if task is None or scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}, ensure_ascii=True))
@@ -274,7 +274,7 @@ def cmd_dns_lookup(args: argparse.Namespace) -> int:
     db.initialize()
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if task is None or scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -348,7 +348,7 @@ def cmd_ct_search(args: argparse.Namespace) -> int:
     db.initialize()
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if task is None or scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -423,7 +423,7 @@ def cmd_rdap_lookup(args: argparse.Namespace) -> int:
     db.initialize()
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if task is None or scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -478,7 +478,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
     db.initialize()
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (args.task_id,)), None)
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if task is None or scope_row is None:
         print(json.dumps({"ok": False, "error": "task_or_scope_not_found"}))
@@ -518,7 +518,7 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     db.initialize()
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -567,7 +567,7 @@ def cmd_port_check(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     db.initialize()
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -616,7 +616,7 @@ def cmd_browser_observe(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     db.initialize()
     scope_row = next(db.rows(
-        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY created_at DESC", (args.task_id,)
+        "SELECT * FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC", (args.task_id,)
     ), None)
     if scope_row is None or not scope_row["confirmed"]:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}))
@@ -683,6 +683,86 @@ def cmd_baseline_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scope_amend(args: argparse.Namespace) -> int:
+    """Retrospective P1-4: controlled scope amendment for discovered assets.
+
+    Only values already present as candidate assets (discovered by gated
+    collection) are eligible; --confirm promotes the proposal into a new
+    scope_version with audit trail and freezes old-version actions (R5).
+    """
+    from surface_intel.state.recovery import freeze_stale_actions
+
+    db = Database(_config(args).database_path)
+    db.initialize()
+    task = next(db.rows("SELECT scope_version FROM task WHERE task_id=?", (args.task_id,)), None)
+    scope_row = next(db.rows(
+        "SELECT payload_json FROM scope_snapshot WHERE task_id=? ORDER BY rowid DESC",
+        (args.task_id,),
+    ), None)
+    if task is None or scope_row is None:
+        print(json.dumps({"ok": False, "error": "task_or_scope_not_found"}))
+        return 2
+    payload = json.loads(scope_row["payload_json"])
+    add_ips = [item.strip() for item in args.add_ips.split(",") if item.strip()]
+    add_domains = [item.strip() for item in args.add_domains.split(",") if item.strip()]
+    if not add_ips and not add_domains:
+        print(json.dumps({"ok": False, "error": "nothing_to_amend"}))
+        return 2
+
+    eligible = {
+        (row["asset_type"], row["normalized_value"])
+        for row in db.rows(
+            "SELECT asset_type, normalized_value FROM asset WHERE task_id=? AND scope_status='candidate'",
+            (args.task_id,),
+        )
+    }
+    ineligible = [value for value in add_ips if ("ip", value.lower()) not in eligible] + \
+                 [value for value in add_domains if ("domain", value.lower().rstrip(".")) not in eligible]
+    if ineligible:
+        print(json.dumps({"ok": False,
+                          "error": "values_not_discovered_by_this_task",
+                          "detail": ineligible}))
+        return 2
+
+    proposal = {
+        "task_id": args.task_id,
+        "base_scope_version": payload.get("scope_version"),
+        "add_ips": add_ips,
+        "add_domains": add_domains,
+        "reason": args.reason,
+    }
+    if not args.confirm:
+        print(json.dumps({"ok": True, "proposal": proposal,
+                          "note": "re-run with --confirm to apply"}, ensure_ascii=True))
+        return 0
+
+    new_version = f"{payload.get('scope_version', 'scope-v1')}-amend-{uuid.uuid4().hex[:6]}"
+    payload["authorized_ips"] = sorted(set(payload.get("authorized_ips", [])) | set(add_ips))
+    payload["authorized_domains"] = sorted(set(payload.get("authorized_domains", [])) | set(add_domains))
+    payload["scope_version"] = new_version
+    scope_id = f"scope-{uuid.uuid4().hex[:16]}"
+    with db.connect() as connection:
+        connection.execute(
+            """INSERT INTO scope_snapshot(scope_id,task_id,scope_version,payload_json,confirmed)
+               VALUES(?,?,?,?,1)""",
+            (scope_id, args.task_id, new_version, json.dumps(payload, ensure_ascii=True)),
+        )
+        connection.execute(
+            "UPDATE task SET scope_version=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
+            (new_version, args.task_id),
+        )
+        connection.execute(
+            "INSERT INTO event(event_id,task_id,event_type,payload_json) VALUES(?,?,?,?)",
+            (f"event-{uuid.uuid4().hex[:16]}", args.task_id, "scope_amended",
+             json.dumps(proposal, ensure_ascii=True)),
+        )
+    frozen = freeze_stale_actions(db, args.task_id, new_version)
+    print(json.dumps({"ok": True, "scope_version": new_version,
+                      "added_ips": add_ips, "added_domains": add_domains,
+                      "frozen_actions": frozen}, ensure_ascii=True))
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
     try:
@@ -734,7 +814,7 @@ def _task_control(args: argparse.Namespace, status: TaskStatus) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="surface-intel")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("baseline-save", cmd_baseline_save), ("baseline-diff", cmd_baseline_diff), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
+    for name, handler in (("init", cmd_init), ("create", cmd_create), ("preflight", cmd_preflight), ("plan", cmd_plan), ("run", cmd_run), ("fofa-health", cmd_fofa_health), ("fofa-search", cmd_fofa_search), ("dns-health", cmd_dns_health), ("dns-lookup", cmd_dns_lookup), ("ct-health", cmd_ct_health), ("ct-search", cmd_ct_search), ("rdap-health", cmd_rdap_health), ("rdap-lookup", cmd_rdap_lookup), ("merge", cmd_merge), ("http-observe", cmd_http_observe), ("port-check", cmd_port_check), ("browser-observe", cmd_browser_observe), ("baseline-save", cmd_baseline_save), ("baseline-diff", cmd_baseline_diff), ("scope-amend", cmd_scope_amend), ("report", cmd_report), ("checkpoint", cmd_checkpoint), ("recover", cmd_recover), ("pause", lambda args: _task_control(args, TaskStatus.PAUSED)), ("resume", lambda args: _task_control(args, TaskStatus.PLANNED)), ("cancel", lambda args: _task_control(args, TaskStatus.CANCELLED)), ("status", cmd_status), ("validate", cmd_validate)):
         command = sub.add_parser(name)
         command.set_defaults(handler=handler)
         if name == "init":
@@ -795,7 +875,12 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--max-requests", type=int, default=100)
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
-        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff"}:
+        if name == "scope-amend":
+            command.add_argument("--add-ips", default="")
+            command.add_argument("--add-domains", default="")
+            command.add_argument("--reason", default="")
+            command.add_argument("--confirm", action="store_true")
+        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "scope-amend"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")

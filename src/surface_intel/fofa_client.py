@@ -105,7 +105,7 @@ class StdioJsonRpcTransport:
         await self.process.stdin.drain()
 
     async def close(self) -> None:
-        if self.process is None:
+        if getattr(self, "process", None) is None:
             return
         process = self.process
         self.process = None
@@ -118,6 +118,12 @@ class StdioJsonRpcTransport:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()
+
+    async def __aenter__(self) -> "StdioJsonRpcTransport":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 
 
 @dataclass
@@ -145,6 +151,13 @@ class FofaStdioClient:
             await self.initialize()
         response = await self.transport.request("tools/call", {"name": name, "arguments": arguments})
         return unwrap_mcp_result(response)
+
+    async def __aenter__(self) -> "FofaStdioClient":
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 
     async def close(self) -> None:
         close = getattr(self.transport, "close", None)

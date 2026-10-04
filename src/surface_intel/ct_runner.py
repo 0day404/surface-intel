@@ -7,6 +7,7 @@ from typing import Any
 from .adapters.base import AdapterResult
 from .adapters.capabilities import CapabilityRegistry
 from .adapters.ct import CertificateTransparencyAdapter
+from .ct_client import CrtShClient, FailoverCtClient
 from .execution import AdapterExecutor, ExecutionContext
 from .policy.scope import Scope
 from .state.database import Database
@@ -50,6 +51,20 @@ def _name_in_scope(scope: Scope, name: str) -> bool:
     return bool(candidate) and scope.is_in_scope(candidate)
 
 
+def ensure_failover(client, fallback=None):
+    """Retrospective P0-1: a bare CrtShClient silently loses the ctlogs.dev
+    failover real operations depend on. Wrap it (idempotent); callers who
+    pinned a single source pass a CrtlogsDevClient/other client explicitly."""
+    from .ct_client import CrtlogsDevClient, FailoverCtClient
+
+    if isinstance(client, (FailoverCtClient, CrtlogsDevClient)):
+        return client
+    if isinstance(client, CrtShClient):
+        fallback = fallback or CrtlogsDevClient(timeout=client.timeout)
+        return FailoverCtClient(client, fallback)
+    return client
+
+
 def _action_id(domain: str) -> str:
     digest = hashlib.sha256(domain.encode()).hexdigest()[:12]
     return f"ct-{digest}"
@@ -82,6 +97,7 @@ async def run_ct_search(
     task_id: str,
     scope: Scope,
     domain: str,
+    failover_client: Any | None = None,
 ) -> CtRunResult:
     """Passive CT log search for one authorized domain, one gated action.
 
@@ -97,6 +113,9 @@ async def run_ct_search(
     if not scope.is_in_scope(normalized_domain):
         return CtRunResult("blocked", 0, 0, error="target_out_of_scope")
 
+    # retrospective P0-1: ensure the ctlogs.dev failover survives a bare
+    # CrtShClient even when the caller forgot configured_ct_client()
+    client = ensure_failover(client, failover_client)
     adapter = CertificateTransparencyAdapter(client)
     registry = CapabilityRegistry([adapter.manifest])
     executor = AdapterExecutor(db, registry)
