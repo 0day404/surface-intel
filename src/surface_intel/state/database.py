@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 class Database:
@@ -100,6 +100,7 @@ class Database:
                     last_seen TEXT,
                     sources_json TEXT NOT NULL DEFAULT '[]',
                     architecture_json TEXT NOT NULL DEFAULT '[]',
+                    attributes_json TEXT NOT NULL DEFAULT '{}',
                     port INTEGER,
                     protocol TEXT,
                     UNIQUE(task_id, asset_type, normalized_value)
@@ -131,6 +132,13 @@ class Database:
                     priority TEXT NOT NULL,
                     reason TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'open'
+                );
+                CREATE TABLE IF NOT EXISTS redaction_map (
+                    task_id TEXT NOT NULL REFERENCES task(task_id),
+                    placeholder TEXT NOT NULL,
+                    plaintext TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(task_id, placeholder)
                 );
                 CREATE TABLE IF NOT EXISTS adapter_registry (
                     adapter_name TEXT PRIMARY KEY,
@@ -311,6 +319,13 @@ class Database:
             if "last_transition" not in relation_columns:
                 db.execute("ALTER TABLE asset_relation ADD COLUMN last_transition TEXT")
             db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (11)")
+            # migration 12: merge-layer observation attributes + email
+            # redaction mapping (attributes only, conflict attributes still
+            # live in asset_conflict rows; redaction_map is local-only and
+            # backs the --reveal-emails report flag)
+            if "attributes_json" not in asset_columns:
+                db.execute("ALTER TABLE asset ADD COLUMN attributes_json TEXT NOT NULL DEFAULT '{}'")
+            db.execute("INSERT OR IGNORE INTO schema_version(version) VALUES (12)")
 
     def health(self) -> dict[str, object]:
         with self.connect() as db:

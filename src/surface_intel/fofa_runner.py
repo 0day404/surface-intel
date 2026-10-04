@@ -9,7 +9,7 @@ from .state.database import Database
 from .state.fofa import FofaBatchRepository
 from .planning import query_fingerprint
 from .fofa_queries import split_fofa_query
-from .redaction import redact
+from .redaction import placeholderize, redact
 import hashlib
 import json
 import uuid
@@ -28,9 +28,12 @@ class FofaRunResult:
 
 
 def _store_fofa_observations(db: Database, task_id: str, result: Any) -> None:
+    from .state.observations import store_redaction_pairs
+
     with db.connect() as connection:
         for item in result.observations:
-            payload = redact(item)
+            payload, email_pairs = placeholderize(redact(item), task_id)
+            store_redaction_pairs(db, connection, task_id, email_pairs)
             raw = json.dumps(payload, ensure_ascii=True, sort_keys=True)
             evidence_id = f"evidence-{uuid.uuid4().hex[:16]}"
             connection.execute(

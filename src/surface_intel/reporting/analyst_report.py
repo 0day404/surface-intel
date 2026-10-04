@@ -52,17 +52,11 @@ def _sources_of(payload_json: str | None) -> str:
     return DASH
 
 
-def build_analyst_report(db: Database, task_id: str, report: dict, output_dir: Path) -> dict:
-    """Build analyst_report.xlsx from the collected data; returns export metadata."""
-    assets = report["assets"]
-    observations = report["observations"]
-    relations = report["asset_relations"]
-
+def _graph_index(assets: list[dict], relations: list[dict]) -> dict:
+    """Relation graph: ip -> domains (fofa_host_ip / service), host -> cert SANs."""
     domains = {row["normalized_value"]: row for row in assets if row["asset_type"] == "domain"}
     ips = {row["normalized_value"]: row for row in assets if row["asset_type"] == "ip"}
     services = [row for row in assets if row["asset_type"] == "service"]
-
-    # relation graph: ip -> domains (fofa_host_ip / service), host -> cert SANs
     asset_value = {row["asset_id"]: row["normalized_value"] for row in assets}
     ip_domains: dict[str, set[str]] = {}
     host_sans: dict[str, set[str]] = {}
@@ -79,71 +73,113 @@ def build_analyst_report(db: Database, task_id: str, report: dict, output_dir: P
                 ip_domains.setdefault(ip, set()).add(domain)
         if rtype == "cert_name" and src in domains:
             host_sans.setdefault(src, set()).add(dst)
+    return {"domains": domains, "ips": ips, "services": services,
+            "ip_domains": ip_domains, "host_sans": host_sans}
 
-    def tag_for(normalized_value: str, asset_type: str) -> str:
-        row = domains.get(normalized_value) or ips.get(normalized_value)
-        if row is None:
-            return RELATED_TAG
-        if row["scope_status"] == "confirmed":
-            return IN_SCOPE_TAG
-        if row["architecture_status"] == "third_party":
-            return THIRD_PARTY_TAG
+
+def _tag_for(index: dict, normalized_value: str) -> str:
+    row = index["domains"].get(normalized_value) or index["ips"].get(normalized_value)
+    if row is None:
         return RELATED_TAG
+    if row["scope_status"] == "confirmed":
+        return IN_SCOPE_TAG
+    if row["architecture_status"] == "third_party":
+        return THIRD_PARTY_TAG
+    return RELATED_TAG
 
-    # ---- 域名资产 ----
-    domain_rows = []
-    for value, row in sorted(domains.items()):
-        subs = sorted(host_sans.get(value, set()))
+
+def _domain_rows(index: dict) -> list[list]:
+    rows = []
+    for value, row in sorted(index["domains"].items()):
+        subs = sorted(index["host_sans"].get(value, set()))
         sources = sorted({item.get("source", DASH)
                           for item in json.loads(row.get("sources_json") or "[]")})
-        domain_rows.append([
-            value, tag_for(value, "domain"), DASH,
+        rows.append([
+            value, _tag_for(index, value), DASH,
             ", ".join(subs) if subs else DASH,
             DASH,  # 归属依据 - analyst
             " + ".join(s.replace("_", " ") for s in sources) if sources else DASH,
         ])
+    return rows
 
-    # ---- IP资产 ----
-    rdap_country = _rdap_countries(observations)
-    ip_rows = []
-    service_values = [row["normalized_value"] for row in services]
-    for value, row in sorted(ips.items()):
+
+def _ip_rows(index: dict, rdap_country: dict[str, str]) -> list[list]:
+    service_values = [row["normalized_value"] for row in index["services"]]
+    rows = []
+    for value, row in sorted(index["ips"].items()):
         port_set = sorted({item.split(":")[1].split("/")[0] for item in service_values
                            if item.split(":")[0] == value})
-        carried = ", ".join(sorted(ip_domains.get(value, set()))) or DASH
-        ip_rows.append([
-            value, tag_for(value, "ip"), rdap_country.get(value, DASH),
+        carried = ", ".join(sorted(index["ip_domains"].get(value, set()))) or DASH
+        rows.append([
+            value, _tag_for(index, value), rdap_country.get(value, DASH),
             carried, ", ".join(port_set) if port_set else DASH, DASH,
         ])
+    return rows
 
-    # ---- 站点（FOFA host + title）----
-    site_rows = []
+
+def _site_rows(observations: list[dict]) -> list[list]:
+    """站点: FOFA host+title rows plus safe_http observed responses (B1)."""
+    rows: list[list] = []
     seen_sites: set[str] = set()
     for row in observations:
-        if row["source"] != "fofa_mcp":
-            continue
         try:
             payload = json.loads(row["payload_json"])
         except json.JSONDecodeError:
             continue
-        host = str(payload.get("host", "") or "")
-        if not host or host in seen_sites:
-            continue
-        seen_sites.add(host)
-        title = str(payload.get("title", "") or DASH)
-        scheme = str(payload.get("protocol", "http"))
-        port = payload.get("port")
-        prefix = "https" if str(port) == "443" or scheme == "https" else "http"
-        site = host if host.startswith(("http://", "https://")) else f"{prefix}://{host}"
-        site_rows.append([site, title, DASH])
+        if row["source"] == "fofa_mcp":
+            host = str(payload.get("host", "") or "")
+            if not host or host in seen_sites:
+                continue
+            seen_sites.add(host)
+            title = str(payload.get("title", "") or DASH)
+            scheme = str(payload.get("protocol", "http"))
+            port = payload.get("port")
+            prefix = "https" if str(port) == "443" or scheme == "https" else "http"
+            site = host if host.startswith(("http://", "https://")) else f"{prefix}://{host}"
+            rows.append([site, title, DASH])
+        elif row["source"] == "safe_http":
+            # failed transports are observations, not sites
+            if str(payload.get("transport_status", "")).lower() not in {"observed", "open", "http_response"}:
+                continue
+            site = str(payload.get("final_url") or payload.get("target") or "").strip()
+            if not site or site in seen_sites:
+                continue
+            seen_sites.add(site)
+            status = payload.get("status_code")
+            rows.append([site, f"HTTP {status}" if status else DASH, "safe_http 主动观察"])
+    return rows
 
-    # ---- 服务 ----
-    service_rows = []
-    for row in sorted(services, key=lambda item: item["normalized_value"]):
+
+def _service_rows(index: dict) -> list[list]:
+    rows = []
+    for row in sorted(index["services"], key=lambda item: item["normalized_value"]):
         ip_part, _, rest = row["normalized_value"].partition(":")
         port, _, protocol = rest.partition("/")
-        service_rows.append([ip_part, port, protocol.upper(),
-                             tag_for(row["normalized_value"], "service"), DASH])
+        rows.append([ip_part, port, protocol.upper(),
+                     _tag_for(index, row["normalized_value"]), DASH])
+    return rows
+
+
+def build_analyst_report(db: Database, task_id: str, report: dict, output_dir: Path) -> dict:
+    """Build analyst_report.xlsx from the collected data; returns export metadata."""
+    assets = report["assets"]
+    observations = report["observations"]
+    relations = report["asset_relations"]
+
+    index = _graph_index(assets, relations)
+
+    # ---- 域名资产 ----
+    domain_rows = _domain_rows(index)
+
+    # ---- IP资产 ----
+    rdap_country = _rdap_countries(observations)
+    ip_rows = _ip_rows(index, rdap_country)
+
+    # ---- 站点（FOFA host + title；safe_http 主动观察结果）----
+    site_rows = _site_rows(observations)
+
+    # ---- 服务 ----
+    service_rows = _service_rows(index)
 
     # ---- 组件（FOFA product 声明，未验证）----
     component_rows = []
@@ -167,7 +203,7 @@ def build_analyst_report(db: Database, task_id: str, report: dict, output_dir: P
         marker = next((m for m in _LOGIN_MARKERS if m in title.lower()), None)
         if marker:
             login_rows.append([site, IN_SCOPE_TAG if any(
-                domain in site for domain in domains) else RELATED_TAG,
+                domain in site for domain in index["domains"]) else RELATED_TAG,
                 "未验证（标题启发式）", marker, "待定", DASH])
 
     # ---- 信息泄露（最小规则：非 2xx 公网响应 + third_party 标记）----
@@ -183,7 +219,7 @@ def build_analyst_report(db: Database, task_id: str, report: dict, output_dir: P
         if status in {401, 403}:
             leak_rows.append([f"{payload.get('target')} 返回 {status}",
                               "safe_http", "公网环境暴露非公开响应，需确认是否应暴露"])
-    for value, row in sorted(ips.items()):
+    for value, row in sorted(index["ips"].items()):
         if row["architecture_status"] == "third_party":
             leak_rows.append([f"{value} 为第三方/共享基础设施",
                               "架构识别", "非自有资产，主动探测已阻止"])

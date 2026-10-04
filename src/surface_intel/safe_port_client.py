@@ -70,9 +70,11 @@ class SafePortProbeClient:
             return self._outcome(host, port, "timeout", started)
         except ConnectionRefusedError:
             return self._outcome(host, port, "closed", started)
-        except ssl.SSLError:
-            # TLS-likely port answered but the handshake failed: still open
-            return self._outcome(host, port, "open", started, tls_error=True)
+        except ssl.SSLError as exc:
+            # TLS-likely port answered but the handshake failed: still open.
+            # error_type keeps the concrete handshake failure for remote triage
+            return self._outcome(host, port, "open", started, tls_error=True,
+                                 error_type=type(exc).__name__)
         except OSError as exc:
             return self._outcome(host, port, "filtered", started, error_type=type(exc).__name__)
         finally:

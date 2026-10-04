@@ -20,6 +20,9 @@ class DnsRunResult:
     observations: int
     queries: int
     error: str | None = None
+    # per-failure detail: which (record_type, resolver) pair failed and why
+    # (B2 - a bare partial/timeout used to hide which queries were lost)
+    failed: tuple[dict[str, str], ...] = ()
 
 
 def classify_records_scope(scope: Scope, record_type: str, records: list[str]) -> str:
@@ -120,7 +123,7 @@ async def run_dns_lookup(
 
     stored = 0
     ok_types = 0
-    failed_types: list[str] = []
+    failed: list[dict[str, str]] = []
     last_error: str | None = None
     for record_type in types:
         action = {
@@ -135,8 +138,18 @@ async def run_dns_lookup(
         if result.status == "completed":
             ok_types += 1
         else:
-            failed_types.append(record_type)
             last_error = result.error
+            # the failing observations carry the resolver label (B2); a gate
+            # block without observations still records the lost record type
+            for item in result.observations:
+                failed.append({
+                    "record_type": record_type,
+                    "resolver": str(item.get("resolver", "") or "unknown"),
+                    "error": str(item.get("error") or result.error or "failed"),
+                })
+            if not result.observations:
+                failed.append({"record_type": record_type, "resolver": "unknown",
+                               "error": str(result.error or "failed")})
             if result.status == "blocked":
                 # scope/budget/capability gates refuse further execution
                 break
@@ -145,5 +158,6 @@ async def run_dns_lookup(
     if ok_types == total:
         return DnsRunResult("completed", stored, total)
     if ok_types > 0:
-        return DnsRunResult("partial", stored, total, error=last_error)
-    return DnsRunResult("failed", stored, total, error=last_error or "all_queries_failed")
+        return DnsRunResult("partial", stored, total, error=last_error, failed=tuple(failed))
+    return DnsRunResult("failed", stored, total, error=last_error or "all_queries_failed",
+                        failed=tuple(failed))

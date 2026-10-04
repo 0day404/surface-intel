@@ -29,6 +29,21 @@ def _default_fetch(url: str, timeout: float, headers: dict[str, str] | None = No
         return response.status, response.read().decode("utf-8", "replace")
 
 
+def _primary_error(outcome: dict[str, Any]) -> str | None:
+    """Best available primary failure detail (D1).
+
+    Client failure dicts carry `http_code` / `error_type`, not an `error`
+    key - the failover marker used to read `None` on every real failure.
+    """
+    if outcome.get("error"):
+        return str(outcome["error"])
+    if outcome.get("error_type"):
+        return str(outcome["error_type"])
+    if outcome.get("http_code") is not None:
+        return f"http_code:{outcome['http_code']}"
+    return None
+
+
 class CrtShClient(CtLogClient):
     """Real certificate-transparency client over crt.sh's JSON API.
 
@@ -61,10 +76,28 @@ class CrtShClient(CtLogClient):
     async def health(self) -> dict[str, Any]:
         return {
             "ok": bool(self._endpoint.startswith("http")),
+            # D1: configuration-only check - ok here never meant "reachable"
+            "verified": False,
+            "note": "configuration_check_only_no_network",
             "endpoint": self._endpoint,
             "timeout": self._timeout,
             "adapter": "ct_log",
         }
+
+    async def probe(self) -> dict[str, Any]:
+        """Real lightweight reachability probe (D1, opt-in via --probe).
+
+        One tiny GET against the endpoint root; callers must gate this behind
+        --real --confirm-real - the default health path stays network-free.
+        """
+        started = time.perf_counter()
+        try:
+            status_code, _body = await asyncio.to_thread(self._fetch, self._endpoint, self._timeout)
+            return {"ok": True, "http_code": status_code,
+                    "latency_ms": int((time.perf_counter() - started) * 1000)}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:200],
+                    "latency_ms": int((time.perf_counter() - started) * 1000)}
 
     async def search(self, domain: str) -> dict[str, Any]:
         normalized = domain.strip().rstrip(".").lower()
@@ -233,6 +266,9 @@ class CrtlogsDevClient(CtLogClient):
     async def health(self) -> dict[str, Any]:
         return {
             "ok": bool(self._search_endpoint.startswith("http")),
+            # D1: configuration-only check - ok here never meant "reachable"
+            "verified": False,
+            "note": "configuration_check_only_no_network",
             "endpoint": self._search_endpoint,
             "detail_endpoint": self._detail_endpoint,
             "detail_limit": self._detail_limit,
@@ -240,6 +276,18 @@ class CrtlogsDevClient(CtLogClient):
             "adapter": "ct_log",
             "source": "ctlogs.dev",
         }
+
+    async def probe(self) -> dict[str, Any]:
+        """Real lightweight reachability probe (D1, opt-in via --probe)."""
+        started = time.perf_counter()
+        try:
+            status_code, _body = await asyncio.to_thread(
+                self._fetch, self._search_endpoint, self._timeout)
+            return {"ok": True, "http_code": status_code,
+                    "latency_ms": int((time.perf_counter() - started) * 1000)}
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:200],
+                    "latency_ms": int((time.perf_counter() - started) * 1000)}
 
     async def search(self, domain: str) -> dict[str, Any]:
         normalized = domain.strip().rstrip(".").lower()
@@ -315,9 +363,23 @@ class FailoverCtClient(CtLogClient):
             "ok": bool(primary_health.get("ok") or fallback_health.get("ok")),
             "strategy": "failover",
             "source": self.source_name,
+            # D1: ok means "one side is configured", never "verified reachable"
+            "verified": False,
+            "note": "configuration_check_only_no_network",
             "primary": primary_health,
             "fallback": fallback_health,
             "adapter": "ct_log",
+        }
+
+    async def probe(self) -> dict[str, Any]:
+        """Real reachability probe of both endpoints (D1, opt-in via --probe)."""
+        primary_probe = await self._primary.probe()
+        fallback_probe = await self._fallback.probe()
+        return {
+            "ok": bool(primary_probe.get("ok") or fallback_probe.get("ok")),
+            "strategy": "failover",
+            "primary": primary_probe,
+            "fallback": fallback_probe,
         }
 
     async def search(self, domain: str) -> dict[str, Any]:
@@ -330,7 +392,7 @@ class FailoverCtClient(CtLogClient):
         marker = {
             "from": getattr(self._primary, "source_name", "primary"),
             "reason": str(primary_outcome.get("status")),
-            "primary_error": primary_outcome.get("error"),
+            "primary_error": _primary_error(primary_outcome),
             "fallback": getattr(self._fallback, "source_name", "fallback"),
         }
         try:

@@ -173,3 +173,42 @@ async def test_actions_audited_in_adapter_call_table(tmp_path):
     assert len(calls) == 1
     assert calls[0]["adapter_name"] == "dns_resolver"
     assert calls[0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_partial_reports_which_type_and_resolver_failed(tmp_path):
+    """B2: a bare 'timeout' used to hide which (record_type, resolver) pair
+    was lost; the structured failed list names them."""
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    client = FixtureDnsClient({
+        ("www.example.com", "A"): {"status": "observed", "records": ["93.184.216.34"]},
+        ("www.example.com", "SOA"): {"status": "timeout", "records": [],
+                                     "resolver": "dns.example.net"},
+    })
+    result = await run_dns_lookup(
+        db, client, task_id="t", scope=scope, domain="www.example.com", record_types=["A", "SOA"]
+    )
+    assert result.status == "partial"
+    assert len(result.failed) == 1
+    assert result.failed[0]["record_type"] == "SOA"
+    assert result.failed[0]["resolver"] == "dns.example.net"
+    assert result.failed[0]["error"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_blocked_gate_without_observations_still_records_lost_type(tmp_path):
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    from surface_intel.state.budget import BudgetRepository
+
+    BudgetRepository(db).create("t", "dns_resolver", 1)
+    client = FixtureDnsClient({
+        ("www.example.com", "A"): {"status": "observed", "records": ["93.184.216.34"]},
+    })
+    result = await run_dns_lookup(
+        db, client, task_id="t", scope=scope, domain="www.example.com", record_types=["A", "AAAA"]
+    )
+    assert result.error == "budget_exhausted"
+    assert [item["record_type"] for item in result.failed] == ["AAAA"]
+    assert result.failed[0]["resolver"] == "unknown"

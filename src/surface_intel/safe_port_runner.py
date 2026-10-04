@@ -22,6 +22,8 @@ class SafePortRunResult:
     observations: int
     error: str | None = None
     review_created: bool = False
+    # A4: set when --allow-hosted-third-party overrode a third_party block
+    override_used: bool = False
 
 
 def _action_id(host: str, port: int) -> str:
@@ -34,9 +36,11 @@ def _store_port_observation(db: Database, task_id: str, scope: Scope, result) ->
     stored = 0
     with db.connect() as connection:
         for item in result.observations:
-            from .redaction import redact
+            from .redaction import placeholderize, redact
+            from .state.observations import store_redaction_pairs
 
-            payload = redact(dict(item))
+            payload, email_pairs = placeholderize(redact(dict(item)), task_id)
+            store_redaction_pairs(db, connection, task_id, email_pairs)
             payload["scope_version"] = scope.scope_version
             payload["observed_at"] = observed_at
             payload["source_quality"] = "direct"
@@ -73,6 +77,7 @@ async def run_port_check(
     scope: Scope,
     target: str,
     port: int,
+    allow_hosted_third_party: bool = False,
 ) -> SafePortRunResult:
     """One gated known-port verification (plan R6.2).
 
@@ -93,10 +98,19 @@ async def run_port_check(
     if port not in {int(item) for item in scope.allowed_ports}:
         return SafePortRunResult("blocked", 0, error="port_not_authorized")
     blocking = _architecture_block(db, task_id, host)
+    override_used = False
     if blocking is not None:
-        review_created = _ensure_review_item(db, task_id, host, blocking)
-        return SafePortRunResult("blocked", 0, error=f"architecture_blocked:{blocking}",
-                                 review_created=review_created)
+        # A4: only the plain third_party status lifts via the explicit flag -
+        # cdn/waf/lb/cloud_hosting signals stay blocking either way
+        if allow_hosted_third_party and blocking == "third_party":
+            from .safe_http_runner import _ensure_override_review_item
+
+            _ensure_override_review_item(db, task_id, host, blocking)
+            override_used = True
+        else:
+            review_created = _ensure_review_item(db, task_id, host, blocking)
+            return SafePortRunResult("blocked", 0, error=f"architecture_blocked:{blocking}",
+                                     review_created=review_created)
 
     adapter = SafePortAdapter(client.probe)
     registry = CapabilityRegistry([adapter.manifest])
@@ -122,7 +136,9 @@ async def run_port_check(
     result = await executor.execute(adapter, action, context)
     stored = _store_port_observation(db, task_id, scope, result)
     if result.status == "completed":
-        return SafePortRunResult("completed", stored)
+        return SafePortRunResult("completed", stored, override_used=override_used)
     if result.status == "blocked":
-        return SafePortRunResult("blocked", stored, error=result.error)
-    return SafePortRunResult("failed", stored, error=result.error)
+        return SafePortRunResult("blocked", stored, error=result.error,
+                                 override_used=override_used)
+    return SafePortRunResult("failed", stored, error=result.error,
+                             override_used=override_used)

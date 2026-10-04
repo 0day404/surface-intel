@@ -15,6 +15,13 @@ from ..state.database import Database
 REPORT_VERSION = "1.0"
 
 
+def report_output_dir(task_root: str | Path, task_id: str) -> Path:
+    """C1: one directory per task under reports/<task-id>/ - consecutive
+    `report` runs of different tasks no longer overwrite each other.
+    Legacy flat reports/ files are left in place, never migrated."""
+    return Path(task_root) / "reports" / task_id
+
+
 def compute_integrity_status(
     task_status: str,
     *,
@@ -36,7 +43,8 @@ def compute_integrity_status(
     return "complete"
 
 
-def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
+def build_report(db: Database, task_id: str, output_dir: str | Path,
+                 *, reveal_emails: bool = False) -> dict:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (task_id,)), None)
@@ -158,6 +166,9 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
             "review_queue_count": len(review_queue),
             "gap_count": len(gaps),
             "budget_lines": len(budgets),
+            # C4: distinguish "no budget configured" (opt-in mechanism, no
+            # rows) from a real zero-consumption budget
+            "budget_configured": bool(budgets),
             "budget_consumed_units": sum(row["consumed_units"] for row in budgets),
             "planned_actions_pending": pending_actions,
             "integrity_unknown_reason": (
@@ -236,6 +247,10 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
         },
         "export": {},
     }
+    if reveal_emails:
+        # C3: explicit opt-in - substitute the redaction_map plaintexts back
+        # into every deliverable; the default keeps placeholders only
+        _reveal_emails(db, task_id, report)
     json_path = output / "result.json"
     json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
     report["export"] = _export_xlsx(output, report, task_id, assets, scope_rows,
@@ -251,6 +266,31 @@ def build_report(db: Database, task_id: str, output_dir: str | Path) -> dict:
     # a failing XLSX never invalidates the already-written JSON main result
     json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
     return report
+
+
+def _reveal_emails(db: Database, task_id: str, report: dict) -> None:
+    """C3: deep-replace local redaction_map placeholders with the plaintext
+    emails. No map entries -> nothing changes."""
+    pairs = [(row["placeholder"], row["plaintext"]) for row in db.rows(
+        "SELECT placeholder,plaintext FROM redaction_map WHERE task_id=?", (task_id,))]
+    if not pairs:
+        return
+
+    def walk(node):
+        if isinstance(node, dict):
+            return {key: walk(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        if isinstance(node, tuple):
+            return tuple(walk(item) for item in node)
+        if isinstance(node, str):
+            for placeholder, plaintext in pairs:
+                if placeholder in node:
+                    node = node.replace(placeholder, plaintext)
+        return node
+
+    for key in list(report):
+        report[key] = walk(report[key])
 
 
 def _export_xlsx(output: Path, report: dict, task_id: str, assets, scope_rows,

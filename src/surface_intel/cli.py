@@ -5,6 +5,7 @@ import asyncio
 import json
 import sys
 import uuid
+import warnings
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,9 +27,9 @@ from .fofa_runner import run_fofa_query
 from .logging import configure_logging
 from .normalization import normalize_targets
 from .planning import build_passive_plan, persist_actions, serialize_plan
-from .policy.scope import Scope
+from .policy.scope import Scope, scope_warnings
 from .state.database import Database
-from .reporting.export import build_report
+from .reporting.export import build_report, report_output_dir
 from .state.recovery import create_checkpoint, latest_checkpoint, recover_started_actions, set_task_status
 from .states import TaskStatus
 
@@ -61,6 +62,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": "scope_has_no_authorized_target"}))
         return 2
     status = TaskStatus.CREATED if confirmed else TaskStatus.AWAITING_SCOPE
+    warnings = scope_warnings(scope)
     with db.connect() as connection:
         connection.execute(
             "INSERT INTO task(task_id,status,schema_version,scope_version) VALUES(?,?,?,?)",
@@ -71,7 +73,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             (f"scope-{uuid.uuid4().hex[:16]}", task_id, scope.get("scope_version", "scope-v0001"),
              json.dumps(scope, ensure_ascii=True), int(confirmed)),
         )
-    print(json.dumps({"ok": True, "task_id": task_id, "status": status.value}))
+    print(json.dumps({"ok": True, "task_id": task_id, "status": status.value,
+                      "warnings": warnings}, ensure_ascii=True))
     return 0
 
 
@@ -93,11 +96,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 2
     scope = next(db.rows("SELECT * FROM scope_snapshot WHERE task_id=?", (args.task_id,)), None)
     confirmed = bool(scope["confirmed"]) if scope else False
+    payload = json.loads(scope["payload_json"]) if scope else {}
     result = {
         "ok": confirmed,
         "task_id": args.task_id,
         "status": "valid" if confirmed else "needs_review",
-        "external_calls_allowed": False if not confirmed else "not_implemented",
+        # C2: a real boolean - the old "not_implemented" sentinel was wrong,
+        # the scope gates have always been live (target_out_of_scope etc.)
+        "external_calls_allowed": confirmed,
+        "active_testing_allowed": bool(payload.get("active_testing_allowed", False)),
+        "active_testing_level": payload.get("active_testing_level", "passive_only"),
     }
     print(json.dumps(result, ensure_ascii=True))
     return 0 if confirmed else 2
@@ -191,8 +199,16 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": "scope_not_confirmed"}, ensure_ascii=True))
         return 2
     scope = Scope.from_dict(json.loads(scope_row["payload_json"]))
-    if not scope.is_in_scope(args.domain):
-        print(json.dumps({"ok": False, "error": "target_out_of_scope"}, ensure_ascii=True))
+    # comma-separated domains run as one OR query (B6); a single value is
+    # byte-identical to the old per-domain query
+    domains = [item.strip().rstrip(".").lower() for item in str(args.domain).split(",") if item.strip()]
+    if not domains:
+        print(json.dumps({"ok": False, "error": "domain_required"}, ensure_ascii=True))
+        return 2
+    out_of_scope = [item for item in domains if not scope.is_in_scope(item)]
+    if out_of_scope:
+        print(json.dumps({"ok": False, "error": "target_out_of_scope", "domains": out_of_scope},
+                         ensure_ascii=True))
         return 2
     with db.connect() as connection:
         connection.execute(
@@ -207,7 +223,7 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
                 client,
                 task_id=args.task_id,
                 scope_version=scope.scope_version,
-                query=f'domain="{args.domain}"',
+                query=" || ".join(f'domain="{item}"' for item in domains),
                 context=TaskContext(args.task_id, scope.scope_version, {"scope_confirmed": True}),
                 size=args.size,
             )
@@ -231,6 +247,7 @@ def cmd_fofa_search(args: argparse.Namespace) -> int:
     print(json.dumps({
         "ok": result.status == "completed",
         "status": result.status,
+        "domains": domains,
         "observations": result.observations,
         "pages": result.pages,
         "batch_id": result.batch_id,
@@ -325,18 +342,33 @@ def cmd_ct_health(args: argparse.Namespace) -> int:
     if not args.real:
         print(json.dumps({"ok": False, "error": "real_flag_required"}))
         return 2
+    if getattr(args, "probe", False) and not args.confirm_real:
+        # D1: --probe is the only health path that touches the network; it
+        # demands the full real-call authorization pair
+        print(json.dumps({"ok": False, "error": "real_and_confirm_real_required"}))
+        return 2
     try:
         client = configured_ct_client()
     except Exception as exc:
         print(json.dumps({"ok": False, "status": "not_configured", "error": type(exc).__name__}))
         return 2
 
+    probe = getattr(args, "probe", False)
+
     async def call():
+        if probe:
+            return await client.probe()
         return await CertificateTransparencyAdapter(client).health(TaskContext("ct-health", "health"))
 
     result = asyncio.run(call())
+    if probe:
+        print(json.dumps({"ok": bool(result.get("ok")), "probe": True,
+                          "network_requests_sent": 1, "detail": result}, ensure_ascii=True, default=str))
+        return 0 if result.get("ok") else 2
     detail = result.observations[0] if result.observations else {}
-    print(json.dumps({"ok": result.status == "completed", "status": result.status, "detail": detail}, ensure_ascii=True))
+    print(json.dumps({"ok": result.status == "completed", "status": result.status,
+                      "verified": bool(detail.get("verified", False)),
+                      "network_requests_sent": 0, "detail": detail}, ensure_ascii=True))
     return 0 if result.status == "completed" else 2
 
 
@@ -387,6 +419,7 @@ def cmd_ct_search(args: argparse.Namespace) -> int:
         "status": result.status,
         "observations": result.observations,
         "certificates": result.certificates,
+        "failovers": result.failovers,
         "error": result.error,
     }, ensure_ascii=True))
     return 0 if result.status == "completed" else 2
@@ -540,7 +573,8 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
 
     async def call():
         return await run_http_observe(db, client, task_id=args.task_id, scope=scope,
-                                      url=args.url, method=args.method)
+                                      url=args.url, method=args.method,
+                                      allow_hosted_third_party=getattr(args, "allow_hosted_third_party", False))
 
     try:
         result = asyncio.run(call())
@@ -553,6 +587,7 @@ def cmd_http_observe(args: argparse.Namespace) -> int:
         "observations": result.observations,
         "error": result.error,
         "review_created": result.review_created,
+        "override_used": result.override_used,
     }, ensure_ascii=True))
     return 0 if result.status == "completed" else 2
 
@@ -589,7 +624,8 @@ def cmd_port_check(args: argparse.Namespace) -> int:
 
     async def call():
         return await run_port_check(db, client, task_id=args.task_id, scope=scope,
-                                    target=args.target, port=args.port)
+                                    target=args.target, port=args.port,
+                                    allow_hosted_third_party=getattr(args, "allow_hosted_third_party", False))
 
     try:
         result = asyncio.run(call())
@@ -602,6 +638,7 @@ def cmd_port_check(args: argparse.Namespace) -> int:
         "observations": result.observations,
         "error": result.error,
         "review_created": result.review_created,
+        "override_used": result.override_used,
     }, ensure_ascii=True))
     return 0 if result.status == "completed" else 2
 
@@ -684,13 +721,19 @@ def cmd_baseline_diff(args: argparse.Namespace) -> int:
 
 
 def cmd_scope_amend(args: argparse.Namespace) -> int:
-    """Retrospective P1-4: controlled scope amendment for discovered assets.
+    """Controlled scope amendment (A1/A2).
 
-    Only values already present as candidate assets (discovered by gated
-    collection) are eligible; --confirm promotes the proposal into a new
-    scope_version with audit trail and freezes old-version actions (R5).
+    Values already discovered as candidates amend freely; --confirm-new-domain
+    opens the explicit user-confirmation channel for never-seen domains; and
+    active authorization rises only via --allow-active (+ --active-level /
+    --ports). Every --confirm lands snapshot + task pointer + audit event in
+    one transaction and freezes old-version actions (R5).
     """
-    from surface_intel.state.recovery import freeze_stale_actions
+    from surface_intel.policy.scope_amend import (
+        AmendmentError,
+        apply_scope_amendment,
+        resolve_amendment_values,
+    )
 
     db = Database(_config(args).database_path)
     db.initialize()
@@ -703,32 +746,50 @@ def cmd_scope_amend(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "error": "task_or_scope_not_found"}))
         return 2
     payload = json.loads(scope_row["payload_json"])
-    add_ips = [item.strip() for item in args.add_ips.split(",") if item.strip()]
-    add_domains = [item.strip() for item in args.add_domains.split(",") if item.strip()]
-    if not add_ips and not add_domains:
-        print(json.dumps({"ok": False, "error": "nothing_to_amend"}))
+    add_ips = tuple(item.strip() for item in args.add_ips.split(",") if item.strip())
+    add_domains = tuple(item.strip() for item in args.add_domains.split(",") if item.strip())
+    ports: list[int] = []
+    if args.ports:
+        for item in args.ports.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                value = int(item)
+            except ValueError:
+                value = -1
+            if not 1 <= value <= 65535:
+                print(json.dumps({"ok": False, "error": "invalid_ports", "detail": item}))
+                return 2
+            ports.append(value)
+    if args.active_level and not args.allow_active:
+        print(json.dumps({"ok": False, "error": "allow_active_required"}))
+        return 2
+    if ports and not args.allow_active:
+        print(json.dumps({"ok": False, "error": "ports_require_allow_active"}))
         return 2
 
-    eligible = {
-        (row["asset_type"], row["normalized_value"])
-        for row in db.rows(
-            "SELECT asset_type, normalized_value FROM asset WHERE task_id=? AND scope_status='candidate'",
-            (args.task_id,),
+    try:
+        values = resolve_amendment_values(
+            db, args.task_id, add_ips=add_ips, add_domains=add_domains,
+            confirm_new_domain=args.confirm_new_domain,
         )
-    }
-    ineligible = [value for value in add_ips if ("ip", value.lower()) not in eligible] + \
-                 [value for value in add_domains if ("domain", value.lower().rstrip(".")) not in eligible]
-    if ineligible:
-        print(json.dumps({"ok": False,
-                          "error": "values_not_discovered_by_this_task",
-                          "detail": ineligible}))
+    except AmendmentError as exc:
+        print(json.dumps({"ok": False, "error": exc.code, "detail": exc.detail}))
+        return 2
+    if values.empty() and not args.allow_active:
+        print(json.dumps({"ok": False, "error": "nothing_to_amend"}))
         return 2
 
     proposal = {
         "task_id": args.task_id,
         "base_scope_version": payload.get("scope_version"),
-        "add_ips": add_ips,
-        "add_domains": add_domains,
+        "add_ips": list(values.add_ips),
+        "add_domains": list(values.add_domains),
+        "user_confirmed_new_domains": list(values.user_confirmed_new_domains),
+        "allow_active": bool(args.allow_active),
+        "active_level": args.active_level if args.allow_active else None,
+        "ports": ports,
         "reason": args.reason,
     }
     if not args.confirm:
@@ -736,30 +797,22 @@ def cmd_scope_amend(args: argparse.Namespace) -> int:
                           "note": "re-run with --confirm to apply"}, ensure_ascii=True))
         return 0
 
-    new_version = f"{payload.get('scope_version', 'scope-v1')}-amend-{uuid.uuid4().hex[:6]}"
-    payload["authorized_ips"] = sorted(set(payload.get("authorized_ips", [])) | set(add_ips))
-    payload["authorized_domains"] = sorted(set(payload.get("authorized_domains", [])) | set(add_domains))
-    payload["scope_version"] = new_version
-    scope_id = f"scope-{uuid.uuid4().hex[:16]}"
-    with db.connect() as connection:
-        connection.execute(
-            """INSERT INTO scope_snapshot(scope_id,task_id,scope_version,payload_json,confirmed)
-               VALUES(?,?,?,?,1)""",
-            (scope_id, args.task_id, new_version, json.dumps(payload, ensure_ascii=True)),
-        )
-        connection.execute(
-            "UPDATE task SET scope_version=?, updated_at=CURRENT_TIMESTAMP WHERE task_id=?",
-            (new_version, args.task_id),
-        )
-        connection.execute(
-            "INSERT INTO event(event_id,task_id,event_type,payload_json) VALUES(?,?,?,?)",
-            (f"event-{uuid.uuid4().hex[:16]}", args.task_id, "scope_amended",
-             json.dumps(proposal, ensure_ascii=True)),
-        )
-    frozen = freeze_stale_actions(db, args.task_id, new_version)
-    print(json.dumps({"ok": True, "scope_version": new_version,
-                      "added_ips": add_ips, "added_domains": add_domains,
-                      "frozen_actions": frozen}, ensure_ascii=True))
+    outcome = apply_scope_amendment(
+        db, args.task_id, base_payload=payload,
+        add_ips=values.add_ips, add_domains=values.add_domains,
+        user_confirmed_new_domains=values.user_confirmed_new_domains,
+        allow_active=args.allow_active,
+        active_level=args.active_level or "safe_discovery",
+        ports=tuple(ports), reason=args.reason, source="manual",
+    )
+    print(json.dumps({"ok": True, "scope_version": outcome.new_scope_version,
+                      "added_ips": list(outcome.added_ips),
+                      "added_domains": list(outcome.added_domains),
+                      "user_confirmed_new_domains": list(outcome.user_confirmed_new_domains),
+                      "active_enabled": outcome.active_enabled,
+                      "active_level": outcome.active_level if outcome.active_enabled else None,
+                      "added_ports": list(outcome.added_ports),
+                      "frozen_actions": outcome.frozen_actions}, ensure_ascii=True))
     return 0
 
 
@@ -799,6 +852,7 @@ def cmd_recon(args: argparse.Namespace) -> int:
             fofa_query=args.query, fofa_size=args.size,
             fofa_max_pages=args.max_pages, ct_domain=args.ct_domain,
             max_rdap_ips=args.max_rdap_ips,
+            auto_amend_discovered_ips=args.auto_amend_discovered_ips,
         )
 
     try:
@@ -813,8 +867,29 @@ def cmd_recon(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     db = Database(_config(args).database_path)
+    if getattr(args, "merge_tasks", None):
+        if args.task_id:
+            print(json.dumps({"ok": False, "error": "task_id_and_merge_exclusive"}))
+            return 2
+        from .reporting.merged import build_merged_report
+
+        try:
+            result = build_merged_report(db, args.merge_tasks,
+                                         Path(_config(args).task_root) / "reports" / "merged",
+                                         reveal_emails=getattr(args, "reveal_emails", False))
+        except ValueError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}))
+            return 2
+        print(json.dumps({"ok": result.get("xlsx_status") == "exported", **result},
+                         ensure_ascii=True, default=str))
+        return 0 if result.get("xlsx_status") == "exported" else 2
+    if not args.task_id:
+        print(json.dumps({"ok": False, "error": "task_id_or_merge_required"}))
+        return 2
     try:
-        report = build_report(db, args.task_id, _config(args).task_root / "reports")
+        # C1: per-task subdirectory - no cross-task overwrite
+        report = build_report(db, args.task_id, report_output_dir(_config(args).task_root, args.task_id),
+                              reveal_emails=getattr(args, "reveal_emails", False))
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2
@@ -880,6 +955,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--real", action="store_true")
         if name == "ct-health":
             command.add_argument("--real", action="store_true")
+            # D1: opt-in real reachability probe; requires --confirm-real too
+            command.add_argument("--probe", action="store_true")
+            command.add_argument("--confirm-real", action="store_true")
         if name == "rdap-health":
             command.add_argument("--real", action="store_true")
         if name == "fofa-search":
@@ -909,12 +987,17 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("task_id")
             command.add_argument("--url", required=True)
             command.add_argument("--method", default="GET", choices=("GET", "HEAD"))
+            # A4: company sites hosted on third-party ranges - explicit override
+            command.add_argument("--allow-hosted-third-party", dest="allow_hosted_third_party",
+                                 action="store_true")
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
         if name == "port-check":
             command.add_argument("task_id")
             command.add_argument("--target", required=True)
             command.add_argument("--port", type=int, required=True)
+            command.add_argument("--allow-hosted-third-party", dest="allow_hosted_third_party",
+                                 action="store_true")
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
         if name == "browser-observe":
@@ -928,6 +1011,12 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--add-domains", default="")
             command.add_argument("--reason", default="")
             command.add_argument("--confirm", action="store_true")
+            # A1/A2: active authorization and never-seen domains only rise
+            # through these explicit flags; intrusive_test is unreachable
+            command.add_argument("--allow-active", action="store_true")
+            command.add_argument("--active-level", choices=("safe_discovery", "safe_probe"), default=None)
+            command.add_argument("--ports", default="")
+            command.add_argument("--confirm-new-domain", action="store_true")
         if name == "recon":
             command.add_argument("task_id")
             command.add_argument("--fofa-query", "--query", dest="query", required=True)
@@ -935,9 +1024,17 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--max-pages", type=int, default=5)
             command.add_argument("--ct-domain", default=None)
             command.add_argument("--max-rdap-ips", type=int, default=5)
+            # A3: opt-in self-amendment for DNS-revealed IPs before the RDAP stage
+            command.add_argument("--auto-amend-discovered-ips", action="store_true")
             command.add_argument("--real", action="store_true")
             command.add_argument("--confirm-real", action="store_true")
-        if name in {"status", "validate", "preflight", "plan", "run", "report", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "scope-amend"}:
+        if name == "report":
+            # C1: positional task_id (single report) XOR --merge (merged workbook)
+            command.add_argument("task_id", nargs="?")
+            command.add_argument("--merge", nargs="+", dest="merge_tasks")
+            # C3: explicit opt-in - restore redaction_map plaintexts into deliverables
+            command.add_argument("--reveal-emails", action="store_true")
+        if name in {"status", "validate", "preflight", "plan", "run", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "scope-amend"}:
             command.add_argument("task_id")
         if name == "checkpoint":
             command.add_argument("--phase", default="manual")
@@ -948,6 +1045,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # D2-3: Windows proactor transports on Python 3.14 emit harmless
+    # "unclosed transport" ResourceWarnings at interpreter shutdown (recon
+    # ends); they drown real output, so silence exactly that message
+    warnings.filterwarnings("ignore", message=".*unclosed transport.*",
+                            category=ResourceWarning)
     args = build_parser().parse_args(argv)
     configure_logging()
     return args.handler(args)

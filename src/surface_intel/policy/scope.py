@@ -106,3 +106,28 @@ class Scope:
         if self.ends_at and now > datetime.fromisoformat(self.ends_at):
             return False, "outside_time_window"
         return True, "allowed"
+
+
+def scope_warnings(data: dict[str, Any]) -> list[str]:
+    """Non-fatal consistency warnings for a scope document (A1-3).
+
+    Fail-closed behavior is unchanged: an active-allow scope without a valid
+    level still gates everything at runtime. These warnings only make that
+    silent downgrade visible at create time instead of at the first blocked
+    active call.
+    """
+    warnings: list[str] = []
+    if not data.get("active_testing_allowed"):
+        return warnings
+    if "active_testing_level" not in data:
+        warnings.append("active_testing_allowed_without_level")
+        return warnings
+    value = data.get("active_testing_level")
+    try:
+        level = ActiveLevel(str(value))
+    except ValueError:
+        warnings.append(f"active_testing_level_invalid:{value}")
+        return warnings
+    if level is ActiveLevel.PASSIVE_ONLY:
+        warnings.append("active_testing_allowed_but_passive_only")
+    return warnings

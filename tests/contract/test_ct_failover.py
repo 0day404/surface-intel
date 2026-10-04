@@ -82,7 +82,8 @@ async def test_primary_infra_failure_fails_over_with_marker():
     assert outcome["failover"] == {
         "from": "script",
         "reason": "http_error",
-        "primary_error": None,
+        # D1: the real failure detail (the marker used to read None forever)
+        "primary_error": "http_code:502",
         "fallback": "script",
     }
     assert fallback.calls == ["example.com"]

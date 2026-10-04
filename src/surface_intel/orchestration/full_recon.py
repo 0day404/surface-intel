@@ -35,6 +35,10 @@ class FullReconResult:
     ct: dict[str, Any] = field(default_factory=dict)
     dns: dict[str, str] = field(default_factory=dict)
     rdap: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # A3: RDAP refusals are easy to miss inside the per-IP rdap map - the
+    # blocked subset is surfaced at the top level for the operator
+    rdap_blocked: list[dict[str, str]] = field(default_factory=list)
+    scope_amendment: dict[str, Any] | None = None
     discovered_hosts: list[str] = field(default_factory=list)
     discovered_ips: list[str] = field(default_factory=list)
     merge: dict[str, Any] = field(default_factory=dict)
@@ -130,6 +134,7 @@ async def run_full_passive_recon(
     dns_hosts: list[str] | None = None,
     max_rdap_ips: int = DEFAULT_MAX_RDAP_IPS,
     max_dns_hosts: int = MAX_DNS_HOSTS,
+    auto_amend_discovered_ips: bool = False,
 ) -> FullReconResult:
     """Run the complete passive discovery chain for one authorized scope.
 
@@ -163,7 +168,8 @@ async def run_full_passive_recon(
         ct_run = await run_ct_search(db, ct_client, task_id=task_id, scope=scope,
                                      domain=ct_domain)
         result.ct = {"status": ct_run.status, "observations": ct_run.observations,
-                     "certificates": ct_run.certificates, "error": ct_run.error}
+                     "certificates": ct_run.certificates, "error": ct_run.error,
+                     "failovers": ct_run.failovers}
         for san in _sans_from_ct(db, task_id):
             if _in_scope_host(scope, san):
                 hosts.add(san)
@@ -178,14 +184,39 @@ async def run_full_passive_recon(
         if cleaned:
             hosts.add(cleaned)
 
-    # 4) DNS on capped host set; A records extend the IP set
+    # 4) DNS on capped host set; A records extend the IP set. Which host
+    # revealed which IP is tracked for the optional auto-amendment (A3).
     dns_hosts_final = sorted(h for h in hosts if h)[:max_dns_hosts]
     result.discovered_hosts = dns_hosts_final
+    dns_revealed: dict[str, set[str]] = {}
     for host in dns_hosts_final:
         dns_run = await run_dns_lookup(db, dns_client, task_id=task_id, scope=scope,
                                        domain=host)
         result.dns[host] = dns_run.status
-        discovered_ips |= _ips_from_dns_a(db, task_id, host)
+        for ip in _ips_from_dns_a(db, task_id, host):
+            discovered_ips.add(ip)
+            dns_revealed.setdefault(ip, set()).add(host)
+
+    # 4.5) A3: optionally self-amend with the IPs the authorized domains' own
+    # A records revealed. Explicit opt-in, audited (source + revealed_by), and
+    # the refreshed scope feeds the RDAP stage below. FOFA-harvested IPs stay
+    # out - third-party index data never expands the scope by itself.
+    pending = sorted(ip for ip in dns_revealed if not scope.is_in_scope(ip))
+    if auto_amend_discovered_ips and pending:
+        from ..policy.scope_amend import apply_scope_amendment
+
+        outcome = apply_scope_amendment(
+            db, task_id, base_payload=scope.to_dict(), add_ips=tuple(pending),
+            reason="IP revealed by A records of authorized domains during recon",
+            source="auto_recon_dns_a",
+            event_extra={"revealed_by": {ip: sorted(dns_revealed[ip]) for ip in pending}},
+        )
+        scope = Scope.from_dict(outcome.payload)
+        result.scope_amendment = {
+            "new_scope_version": outcome.new_scope_version,
+            "added_ips": list(outcome.added_ips),
+            "source": "auto_recon_dns_a",
+        }
 
     # 5) RDAP on capped IP set
     rdap_targets = sorted(discovered_ips)[:max_rdap_ips]
@@ -194,6 +225,8 @@ async def run_full_passive_recon(
         rdap_run = await run_rdap_lookup(db, rdap_client, task_id=task_id, scope=scope,
                                          target=ip, kind="ip")
         result.rdap[ip] = {"status": rdap_run.status, "error": rdap_run.error}
+        if rdap_run.status == "blocked":
+            result.rdap_blocked.append({"ip": ip, "error": rdap_run.error or "blocked"})
 
     # 6) merge + architecture over everything collected
     merge_run = merge_task_observations(db, task_id, scope)

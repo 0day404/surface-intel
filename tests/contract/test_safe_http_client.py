@@ -65,6 +65,9 @@ async def test_third_party_redirect_is_blocked_not_followed():
     outcome = await client.observe("https://www.example.com/", allowed_hosts=("example.com",))
     assert outcome["status"] == "redirect_blocked"
     assert outcome["blocked_host"] == "tracker.thirdparty.net"
+    # B4: where the blocked redirect was headed is recorded without contacting it
+    assert outcome["blocked_url"] == "https://tracker.thirdparty.net/pixel"
+    assert outcome["redirect_chain"][0]["location"] == "https://tracker.thirdparty.net/pixel"
     # the chain records where we stopped, but the third party was never contacted
     assert outcome["redirect_chain"][0]["http_status"] == 302
 
@@ -98,8 +101,12 @@ async def test_timeout_and_tls_and_connection_errors_are_distinct():
     timeout_client = SafeHttpFetchClient(fetch_hop=_fail(TimeoutError()))
     assert (await timeout_client.observe("https://www.example.com/"))["status"] == "timeout"
 
-    tls_client = SafeHttpFetchClient(fetch_hop=_fail(ssl.SSLError("handshake")))
-    assert (await tls_client.observe("https://www.example.com/"))["status"] == "tls_error"
+    tls_client = SafeHttpFetchClient(fetch_hop=_fail(ssl.SSLError("certificate verify failed")))
+    tls_outcome = await tls_client.observe("https://www.example.com/")
+    assert tls_outcome["status"] == "tls_error"
+    # B3: the concrete handshake failure is preserved for remote triage
+    assert tls_outcome["error_type"] == "SSLError"
+    assert "certificate verify failed" in tls_outcome["error"]
 
     conn_client = SafeHttpFetchClient(fetch_hop=_fail(ConnectionResetError()))
     outcome = await conn_client.observe("https://www.example.com/")

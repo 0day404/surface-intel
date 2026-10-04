@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 from .policy.scope import Scope
 from .state.database import Database
@@ -218,6 +219,10 @@ class _AssetDraft:
     seen: list[str] = field(default_factory=list)
     strengths: set[str] = field(default_factory=set)
     attributes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # latest-wins observation attributes (http_status, final_url, ...),
+    # persisted to asset.attributes_json; conflict-bearing attributes never
+    # go here - they keep the append-only path and surface as conflict rows
+    observations: dict[str, dict[str, Any]] = field(default_factory=dict)
     port: int | None = None
     protocol: str | None = None
 
@@ -485,11 +490,112 @@ def _extract_fofa(workspace: _MergeWorkspace, payload: dict[str, Any], observati
     # products (plan 12.3) - they become R6 fingerprint evidence
 
 
+def _record_attribute(
+    workspace: _MergeWorkspace,
+    key: tuple[str, str],
+    name: str,
+    value: Any,
+    observation: dict[str, Any],
+) -> None:
+    """Latest-wins observation attribute (http_status, final_url, ...).
+
+    Conflict-bearing attributes (CONFLICT_ATTRIBUTES) never route through
+    here: they keep the append-only path and surface as asset_conflict rows.
+    """
+    if name in CONFLICT_ATTRIBUTES:
+        return
+    text = str(value or "").strip()
+    if not text:
+        return
+    entry = {
+        "value": text, "source": observation["source"],
+        "observation_id": observation["observation_id"],
+        "observed_at": observation.get("observed_at", ""),
+    }
+    previous = workspace.assets[key].observations.get(name)
+    try:
+        newer = previous is None or (
+            _parse_timestamp(entry["observed_at"]) >= _parse_timestamp(previous["observed_at"]))
+    except ValueError:
+        newer = True
+    if newer:
+        workspace.assets[key].observations[name] = entry
+
+
+def _extract_safe_http(workspace: _MergeWorkspace, payload: dict[str, Any], observation: dict[str, Any]) -> None:
+    """Active HTTP observation -> refresh host-asset attributes (B1).
+
+    Failed transports (timeout/tls_error/redirect_blocked/...) carry no asset
+    facts and are skipped. Observed responses only refresh attributes of the
+    host the runner already scope-checked; the anchor guard in
+    _MergeWorkspace.asset still applies as defense in depth.
+    """
+    if str(payload.get("transport_status", "")).lower() not in {"observed", "open", "http_response"}:
+        return
+    host = (urlsplit(str(payload.get("target", ""))).hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return
+    host_type = "ip" if _parses_as_ip(host) else "domain"
+    key = workspace.asset(host_type, host, source=observation["source"],
+                          observation_id=observation["observation_id"],
+                          observed_at=observation.get("observed_at", ""),
+                          scope_anchored=True)
+    if key is None:
+        return
+    headers = payload.get("headers") or {}
+    _record_attribute(workspace, key, "http_status", payload.get("status_code"), observation)
+    _record_attribute(workspace, key, "http_server", headers.get("server"), observation)
+    _record_attribute(workspace, key, "http_final_url", payload.get("final_url"), observation)
+    _record_attribute(workspace, key, "http_content_type", payload.get("content_type"), observation)
+
+
+def _extract_safe_port(workspace: _MergeWorkspace, payload: dict[str, Any], observation: dict[str, Any]) -> None:
+    """Open-port verification -> service asset or host attribute (B1).
+
+    Closed/timeout/filtered outcomes create nothing. The service taxonomy is
+    IP-keyed (`<ip>:<port>/<protocol>`), so domain targets record the open
+    port as a host attribute instead (auditable skip, no invention). The
+    protocol is evidence-based - only a TLS certificate digest or a recorded
+    handshake failure justifies `https`, never the port number.
+    """
+    if str(payload.get("transport_status", payload.get("status", ""))).lower() != "open":
+        return
+    host = str(payload.get("target", "")).strip().lower().rstrip(".")
+    port = payload.get("port")
+    if not host or not isinstance(port, int):
+        return
+    protocol = "https" if (payload.get("tls_sha256") or payload.get("tls_error")) else "unknown"
+    host_type = "ip" if _parses_as_ip(host) else "domain"
+    host_key = workspace.asset(host_type, host, source=observation["source"],
+                               observation_id=observation["observation_id"],
+                               observed_at=observation.get("observed_at", ""),
+                               scope_anchored=True)
+    if host_key is None:
+        return
+    if host_type == "domain":
+        workspace.skipped.append({
+            "reason": "service_requires_ip_host", "asset_type": "service",
+            "value": f"{host}:{port}/{protocol}", "observation_id": observation["observation_id"],
+        })
+        _record_attribute(workspace, host_key, f"open_port_{port}", protocol, observation)
+        return
+    service_key = workspace.asset("service", f"{host}:{port}/{protocol}",
+                                  source=observation["source"],
+                                  observation_id=observation["observation_id"],
+                                  observed_at=observation.get("observed_at", ""),
+                                  scope_anchored=True, port=port, protocol=protocol)
+    workspace.relation(host_key, service_key, "service_ip", source=observation["source"],
+                       observation_id=observation["observation_id"],
+                       observed_at=observation.get("observed_at", ""))
+
+
 _EXTRACTORS = {
     "dns_resolver": _extract_dns,
     "ct_log": _extract_ct,
     "rdap_lookup": _extract_rdap,
     "fofa_mcp": _extract_fofa,
+    "safe_http": _extract_safe_http,
+    "safe_port": _extract_safe_port,
 }
 
 
@@ -534,6 +640,12 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
     with db.connect() as connection:
         for (asset_type, normalized_value), draft in sorted(workspace.assets.items()):
             sources_payload = json.dumps(draft.sources, ensure_ascii=True, sort_keys=True)
+            # conflict-bearing attributes stay in asset_conflict rows only;
+            # attributes_json carries the latest observed facts exclusively
+            attributes_payload = json.dumps(
+                {name: entry for name, entry in draft.observations.items()
+                 if name not in CONFLICT_ATTRIBUTES},
+                ensure_ascii=True, sort_keys=True)
             first_seen = min(draft.seen) if draft.seen else now
             last_seen = max(draft.seen) if draft.seen else now
             confidence = asset_confidence(
@@ -552,10 +664,12 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                 asset_id = f"asset-{uuid.uuid4().hex[:16]}"
                 connection.execute(
                     """INSERT INTO asset(asset_id,task_id,asset_type,normalized_value,scope_status,
-                                         confidence,first_seen,last_seen,sources_json,port,protocol)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                         confidence,first_seen,last_seen,sources_json,attributes_json,
+                                         port,protocol)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (asset_id, task_id, asset_type, normalized_value, draft.scope_status,
-                     confidence, first_seen, last_seen, sources_payload, draft.port, draft.protocol),
+                     confidence, first_seen, last_seen, sources_payload, attributes_payload,
+                     draft.port, draft.protocol),
                 )
                 created += 1
             else:
@@ -567,13 +681,14 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                          first_seen=CASE WHEN first_seen IS NULL OR first_seen<? THEN first_seen ELSE ? END,
                          last_seen=CASE WHEN last_seen IS NULL OR last_seen<? THEN ? ELSE last_seen END,
                          sources_json=?,
+                         attributes_json=?,
                          port=COALESCE(?, port),
                          protocol=COALESCE(?, protocol)
                        WHERE asset_id=?""",
                     (draft.scope_status, confidence,
                      first_seen, first_seen,
                      last_seen, last_seen,
-                     sources_payload, draft.port, draft.protocol, asset_id),
+                     sources_payload, attributes_payload, draft.port, draft.protocol, asset_id),
                 )
                 updated += 1
 
@@ -582,10 +697,15 @@ def merge_task_observations(db: Database, task_id: str, scope: Scope) -> MergeSu
                     continue
                 distinct = {json.dumps(item, sort_keys=True) for item in values}
                 distinct_values = [json.loads(item) for item in sorted(distinct)]
-                distinct_values_by_value: dict[str, list[dict[str, Any]]] = {}
+                values_by_observation: dict[str, set[str]] = {}
                 for item in distinct_values:
-                    distinct_values_by_value.setdefault(str(item["value"]), []).append(item)
-                if len(distinct_values_by_value) > 1:
+                    values_by_observation.setdefault(
+                        str(item["observation_id"]), set()).add(str(item["value"]))
+                # Multi-valued attributes inside one observation (an RDAP record
+                # listing registrant/admin/tech contacts) are multi-valued, not
+                # contradictory; observations conflict only when their value
+                # SETS differ. All distinct values stay in values_json either way.
+                if len({frozenset(v) for v in values_by_observation.values()}) > 1:
                     connection.execute(
                         "DELETE FROM asset_conflict WHERE task_id=? AND asset_id=? AND attribute=?",
                         (task_id, asset_id, attribute_name),

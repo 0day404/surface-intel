@@ -71,6 +71,8 @@ class SafeHttpAdapter:
             "tls_sha256": response.get("tls_sha256"),
             "response_time_ms": response.get("response_ms", response.get("response_time_ms")),
             "transport_status": transport_status,
+            "error": response.get("error"),
+            "error_type": response.get("error_type"),
             "application_status": response.get("application_status", "http_response"),
             "source": self.manifest.name,
         }

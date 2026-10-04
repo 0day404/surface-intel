@@ -83,3 +83,98 @@ def test_amend_refuses_values_never_discovered(tmp_path):
 def test_amend_with_no_values_refused(tmp_path):
     code = main(["scope-amend", "--task-root", str(tmp_path), "t"])
     assert code == 2
+
+
+def test_allow_active_alone_upgrades_to_safe_discovery(tmp_path, capsys):
+    """A1: the missing piece - a passive task can become an active-authorized
+    one in place, no new task required."""
+    db = _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--allow-active", "--confirm", "--reason", "upgrade to active observation"])
+    assert code == 0
+    task_version = next(db.rows("SELECT scope_version FROM task WHERE task_id='t'"))["scope_version"]
+    payload = json.loads(next(db.rows(
+        "SELECT payload_json FROM scope_snapshot WHERE scope_version=?", (task_version,)))["payload_json"])
+    assert payload["active_testing_allowed"] is True
+    assert payload["active_testing_level"] == "safe_discovery"
+    event = next(db.rows("SELECT payload_json FROM event WHERE event_type='scope_amended'"))
+    event_payload = json.loads(event["payload_json"])
+    assert event_payload["active_testing_allowed"] is True
+    assert event_payload["source"] == "manual"
+
+
+def test_active_level_and_ports_ride_allow_active(tmp_path):
+    db = _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--add-ips", "203.0.113.5", "--allow-active",
+                 "--active-level", "safe_probe", "--ports", "80,443", "--confirm"])
+    assert code == 0
+    task_version = next(db.rows("SELECT scope_version FROM task WHERE task_id='t'"))["scope_version"]
+    payload = json.loads(next(db.rows(
+        "SELECT payload_json FROM scope_snapshot WHERE scope_version=?", (task_version,)))["payload_json"])
+    assert payload["active_testing_level"] == "safe_probe"
+    assert payload["allowed_ports"] == [80, 443]
+    event = json.loads(next(db.rows(
+        "SELECT payload_json FROM event WHERE event_type='scope_amended'"))["payload_json"])
+    assert event["added_ports"] == [80, 443]
+
+
+def test_active_level_without_allow_active_refused(tmp_path, capsys):
+    _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--active-level", "safe_probe", "--confirm"])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "allow_active_required"
+
+
+def test_ports_without_allow_active_refused(tmp_path, capsys):
+    _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--ports", "443", "--confirm"])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "ports_require_allow_active"
+
+
+def test_out_of_range_port_refused(tmp_path, capsys):
+    _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--allow-active", "--ports", "70000", "--confirm"])
+    assert code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "invalid_ports"
+
+
+def test_intrusive_test_is_unreachable(tmp_path):
+    """argparse choices physically exclude the intrusive level - the
+    fail-closed guarantee does not depend on runtime checks."""
+    _seed(tmp_path)
+    with pytest.raises(SystemExit):
+        main(["scope-amend", "--task-root", str(tmp_path), "t",
+              "--allow-active", "--active-level", "intrusive_test", "--confirm"])
+
+
+def test_confirm_new_domain_channel_audits_user_confirmation(tmp_path):
+    """A2: explicitly user-confirmed never-seen domains amend, with the
+    confirmation source recorded in the audit event."""
+    db = _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--add-domains", "partner.example.org",
+                 "--confirm-new-domain", "--confirm", "--reason", "user expanded scope"])
+    assert code == 0
+    task_version = next(db.rows("SELECT scope_version FROM task WHERE task_id='t'"))["scope_version"]
+    payload = json.loads(next(db.rows(
+        "SELECT payload_json FROM scope_snapshot WHERE scope_version=?", (task_version,)))["payload_json"])
+    assert "partner.example.org" in payload["authorized_domains"]
+    event = json.loads(next(db.rows(
+        "SELECT payload_json FROM event WHERE event_type='scope_amended'"))["payload_json"])
+    assert event["user_confirmed_new"] is True
+    assert event["user_confirmed_new_domains"] == ["partner.example.org"]
+
+
+def test_new_domain_without_channel_still_refused(tmp_path, capsys):
+    _seed(tmp_path)
+    code = main(["scope-amend", "--task-root", str(tmp_path), "t",
+                 "--add-domains", "partner.example.org", "--confirm"])
+    assert code == 2
+    body = json.loads(capsys.readouterr().out)
+    assert body["error"] == "values_not_discovered_by_this_task"
+    assert body["detail"] == ["partner.example.org"]

@@ -20,6 +20,8 @@ class CtRunResult:
     observations: int
     certificates: int
     error: str | None = None
+    # D1: failover markers make primary degradation visible in run summaries
+    failovers: int = 0
 
 
 def classify_certificates_scope(scope: Scope, certificates: list[dict[str, Any]]) -> str:
@@ -139,8 +141,9 @@ async def run_ct_search(
         for item in result.observations
         if item.get("status") in {"observed", "empty"}
     )
+    failovers = sum(1 for item in result.observations if item.get("failover"))
     if result.status == "completed":
-        return CtRunResult("completed", stored, certificates)
+        return CtRunResult("completed", stored, certificates, failovers=failovers)
     if result.status == "blocked":
-        return CtRunResult("blocked", stored, certificates, error=result.error)
-    return CtRunResult("failed", stored, certificates, error=result.error)
+        return CtRunResult("blocked", stored, certificates, error=result.error, failovers=failovers)
+    return CtRunResult("failed", stored, certificates, error=result.error, failovers=failovers)

@@ -189,3 +189,69 @@ def test_rerun_is_idempotent_on_assets(tmp_path):
     # re-merge updates in place, never duplicates
     assert second.merge["assets_created"] == 0
     assert second.merge["assets_updated"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_dns_revealed_ips_block_at_rdap_and_surface_in_summary(tmp_path):
+    """A3: with empty authorized_ips, DNS-revealed IPs are RDAP-blocked and
+    the blocked subset is visible at the top level, not only in result.rdap."""
+    scope = _scope()  # no authorized_ips
+    db = _setup(tmp_path, scope)
+    rdap = StubRdap()
+    result = await run_full_passive_recon(
+        db, task_id="t", scope=scope,
+        fofa_client=StubFofa([]), ct_client=StubCt([]),
+        dns_client=StubDns({"www.example.com": ["203.0.113.5"]}),
+        rdap_client=rdap, fofa_query='domain="example.com"',
+        dns_hosts=["www.example.com"],
+    )
+    assert result.rdap["203.0.113.5"]["status"] == "blocked"
+    assert result.rdap_blocked == [{"ip": "203.0.113.5", "error": "target_out_of_scope"}]
+    assert result.scope_amendment is None
+    assert rdap.calls == []  # gated before any client call
+
+
+@pytest.mark.asyncio
+async def test_auto_amend_flag_authorizes_dns_revealed_ips_and_audits(tmp_path):
+    """A3: the explicit switch amends with exactly the DNS-revealed pending
+    IPs, the audit event names the revealing hosts, and RDAP proceeds."""
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    rdap = StubRdap()
+    result = await run_full_passive_recon(
+        db, task_id="t", scope=scope,
+        fofa_client=StubFofa([]), ct_client=StubCt([]),
+        dns_client=StubDns({"www.example.com": ["203.0.113.5"]}),
+        rdap_client=rdap, fofa_query='domain="example.com"',
+        dns_hosts=["www.example.com"], auto_amend_discovered_ips=True,
+    )
+    assert result.scope_amendment is not None
+    assert result.scope_amendment["added_ips"] == ["203.0.113.5"]
+    assert result.scope_amendment["source"] == "auto_recon_dns_a"
+    assert result.scope_amendment["new_scope_version"].startswith("scope-v1-amend-")
+    assert result.rdap_blocked == []
+    assert rdap.calls == [("203.0.113.5", "ip")]
+    assert result.rdap["203.0.113.5"]["status"] == "completed"
+    event = json.loads(next(db.rows(
+        "SELECT payload_json FROM event WHERE event_type='scope_amended'"))["payload_json"])
+    assert event["source"] == "auto_recon_dns_a"
+    assert event["revealed_by"] == {"203.0.113.5": ["www.example.com"]}
+    task_version = next(db.rows("SELECT scope_version FROM task WHERE task_id='t'"))["scope_version"]
+    assert task_version == result.scope_amendment["new_scope_version"]
+
+
+@pytest.mark.asyncio
+async def test_auto_amend_writes_nothing_when_all_ips_already_authorized(tmp_path):
+    scope = _scope(authorized_ips=("203.0.113.5",))
+    db = _setup(tmp_path, scope)
+    result = await run_full_passive_recon(
+        db, task_id="t", scope=scope,
+        fofa_client=StubFofa([]), ct_client=StubCt([]),
+        dns_client=StubDns({"www.example.com": ["203.0.113.5"]}),
+        rdap_client=StubRdap(), fofa_query='domain="example.com"',
+        dns_hosts=["www.example.com"], auto_amend_discovered_ips=True,
+    )
+    assert result.scope_amendment is None
+    assert result.rdap_blocked == []
+    # no new snapshot: the setup wrote none and the run must not add one
+    assert next(db.rows("SELECT COUNT(*) AS count FROM scope_snapshot"))["count"] == 0

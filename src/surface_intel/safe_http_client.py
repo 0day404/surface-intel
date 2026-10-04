@@ -110,7 +110,7 @@ class SafeHttpFetchClient:
                         "redirect_chain": chain, "queried_at": _now()}
             if allowed_hosts and not _host_allowed(host, allowed_hosts):
                 return {"status": "redirect_blocked", "redirect_chain": chain,
-                        "blocked_host": host, "queried_at": _now()}
+                        "blocked_url": current, "blocked_host": host, "queried_at": _now()}
             private = await asyncio.to_thread(self._private_ip, host)
             if private:
                 return {"status": "private_blocked", "redirect_chain": chain,
@@ -121,8 +121,12 @@ class SafeHttpFetchClient:
                 body = body[: self._max_body_bytes]
             except TimeoutError:
                 return {"status": "timeout", "redirect_chain": chain, "queried_at": _now()}
-            except ssl.SSLError:
-                return {"status": "tls_error", "redirect_chain": chain, "queried_at": _now()}
+            except ssl.SSLError as exc:
+                # record the concrete handshake failure so remote triage can
+                # tell a certificate mismatch from a protocol/version problem
+                return {"status": "tls_error", "error_type": type(exc).__name__,
+                        "error": str(exc)[:200], "redirect_chain": chain,
+                        "queried_at": _now()}
             except (ConnectionError, OSError) as exc:
                 return {"status": "http_error", "error_type": type(exc).__name__,
                         "redirect_chain": chain, "queried_at": _now()}
@@ -136,6 +140,9 @@ class SafeHttpFetchClient:
                 if len(chain) > self._max_redirects:
                     return {"status": "http_error", "error_type": "too_many_redirects",
                             "redirect_chain": chain, "queried_at": _now()}
+                # keep the raw Location value on the hop: where a blocked
+                # redirect was headed is harmless, high-value context (B4)
+                chain[-1]["location"] = location
                 current = urllib.parse.urljoin(current, location)
                 continue
             elapsed_ms = int((time.perf_counter() - started) * 1000)

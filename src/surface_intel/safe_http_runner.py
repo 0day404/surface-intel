@@ -34,6 +34,8 @@ class SafeHttpRunResult:
     observations: int
     error: str | None = None
     review_created: bool = False
+    # A4: set when --allow-hosted-third-party overrode a third_party block
+    override_used: bool = False
 
 
 def _host_of(url: str) -> str:
@@ -61,8 +63,10 @@ def _architecture_block(db: Database, task_id: str, host: str) -> str | None:
 
 
 def _ensure_review_item(db: Database, task_id: str, host: str, architecture_status: str) -> bool:
-    """Idempotent review item (gap row) for a blocked target."""
-    reason = f"architecture_blocked:{architecture_status}:{host}"
+    """Idempotent review item (gap row) for a blocked target; the reason
+    carries the remediation paths so the queue item is actionable (A4)."""
+    reason = (f"architecture_blocked:{architecture_status}:{host} "
+              f"(remedy: scope-amend --add-ips 后重试, 或 --allow-hosted-third-party)")
     existing = next(db.rows(
         "SELECT gap_id FROM gap WHERE task_id=? AND reason=?", (task_id, reason),
     ), None)
@@ -72,6 +76,24 @@ def _ensure_review_item(db: Database, task_id: str, host: str, architecture_stat
         connection.execute(
             "INSERT INTO gap(gap_id,task_id,priority,reason,status) VALUES(?,?,?,?,'open')",
             (f"gap-{uuid.uuid4().hex[:16]}", task_id, "high", reason),
+        )
+    return True
+
+
+def _ensure_override_review_item(db: Database, task_id: str, host: str,
+                                 architecture_status: str) -> bool:
+    """A4: an explicit --allow-hosted-third-party bypass is itself recorded
+    as a review item, so an override never happens silently."""
+    reason = f"architecture_override:{architecture_status}:{host}"
+    existing = next(db.rows(
+        "SELECT gap_id FROM gap WHERE task_id=? AND reason=?", (task_id, reason),
+    ), None)
+    if existing is not None:
+        return False
+    with db.connect() as connection:
+        connection.execute(
+            "INSERT INTO gap(gap_id,task_id,priority,reason,status) VALUES(?,?,?,?,'open')",
+            (f"gap-{uuid.uuid4().hex[:16]}", task_id, "medium", reason),
         )
     return True
 
@@ -92,9 +114,11 @@ def _store_http_observation(db: Database, task_id: str, scope: Scope, result: Ad
         related = "needs_review"
     with db.connect() as connection:
         for item in result.observations:
-            from .redaction import redact
+            from .redaction import placeholderize, redact
+            from .state.observations import store_redaction_pairs
 
-            payload = redact(dict(item))
+            payload, email_pairs = placeholderize(redact(dict(item)), task_id)
+            store_redaction_pairs(db, connection, task_id, email_pairs)
             payload["scope_version"] = scope.scope_version
             payload["observed_at"] = observed_at
             payload["source_quality"] = "direct"
@@ -126,6 +150,7 @@ async def run_http_observe(
     scope: Scope,
     url: str,
     method: str = "GET",
+    allow_hosted_third_party: bool = False,
 ) -> SafeHttpRunResult:
     """One gated low-impact HTTP observation (plan R6.1).
 
@@ -144,10 +169,17 @@ async def run_http_observe(
     if not host or not scope.is_in_scope(host):
         return SafeHttpRunResult("blocked", 0, error="target_out_of_scope")
     blocking = _architecture_block(db, task_id, host)
+    override_used = False
     if blocking is not None:
-        review_created = _ensure_review_item(db, task_id, host, blocking)
-        return SafeHttpRunResult("blocked", 0, error=f"architecture_blocked:{blocking}",
-                                 review_created=review_created)
+        # A4: only the plain third_party status lifts via the explicit flag -
+        # cdn/waf/lb/cloud_hosting signals stay blocking either way
+        if allow_hosted_third_party and blocking == "third_party":
+            _ensure_override_review_item(db, task_id, host, blocking)
+            override_used = True
+        else:
+            review_created = _ensure_review_item(db, task_id, host, blocking)
+            return SafeHttpRunResult("blocked", 0, error=f"architecture_blocked:{blocking}",
+                                     review_created=review_created)
 
     allowed_hosts = tuple(scope.authorized_domains) + tuple(scope.authorized_ips) + tuple(scope.authorized_targets)
     method = method.upper()
@@ -185,7 +217,9 @@ async def run_http_observe(
     result = await executor.execute(adapter, action, context)
     stored = _store_http_observation(db, task_id, scope, result)
     if result.status == "completed":
-        return SafeHttpRunResult("completed", stored)
+        return SafeHttpRunResult("completed", stored, override_used=override_used)
     if result.status == "blocked":
-        return SafeHttpRunResult("blocked", stored, error=result.error)
-    return SafeHttpRunResult("failed", stored, error=result.error)
+        return SafeHttpRunResult("blocked", stored, error=result.error,
+                                 override_used=override_used)
+    return SafeHttpRunResult("failed", stored, error=result.error,
+                             override_used=override_used)

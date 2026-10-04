@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from ..adapters.base import AdapterResult
 from ..policy.scope import Scope
-from ..redaction import redact
+from ..redaction import placeholderize, redact
 from .database import Database
 
 # Keys every passive-source observation must carry, regardless of adapter.
@@ -22,6 +22,18 @@ UNIFIED_METADATA_KEYS = (
     "license_status",
     "related_scope_status",
 )
+
+
+def store_redaction_pairs(db: Database, connection, task_id: str,
+                          pairs: list[tuple[str, str]]) -> None:
+    """Persist email placeholder -> plaintext pairs (C3) in the caller's
+    transaction. The map stays in the local task.sqlite; deliverables carry
+    placeholders only until `report --reveal-emails` is passed."""
+    for placeholder, plaintext in pairs:
+        connection.execute(
+            "INSERT OR IGNORE INTO redaction_map(task_id,placeholder,plaintext) VALUES(?,?,?)",
+            (task_id, placeholder, plaintext),
+        )
 
 
 def store_unified_observations(
@@ -39,13 +51,16 @@ def store_unified_observations(
     source-specific `{source_quality, license_status, related_scope_status}`
     triple; scope binding and timestamps are added here so every passive
     source carries the same metadata contract. Raw payloads are redacted
-    before any write and never reach the logging pipeline.
+    before any write and never reach the logging pipeline; email addresses
+    are additionally placeholderized with the plaintext kept in redaction_map
+    (C3) - the evidence sha256 covers the placeholderized payload.
     """
     observed_at = datetime.now(timezone.utc).isoformat()
     stored = 0
     with db.connect() as connection:
         for item in result.observations:
-            payload = redact(dict(item))
+            payload, email_pairs = placeholderize(redact(dict(item)), task_id)
+            store_redaction_pairs(db, connection, task_id, email_pairs)
             payload["scope_version"] = scope.scope_version
             payload["observed_at"] = observed_at
             payload.update(metadata_for(payload))

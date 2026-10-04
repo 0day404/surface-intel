@@ -170,6 +170,57 @@ def test_same_value_reobserved_is_not_a_conflict(tmp_path):
     assert summary.conflicts_created == 0
 
 
+def test_single_observation_multi_valued_org_is_not_a_conflict(tmp_path):
+    """One RDAP record listing several contacts is multi-valued, not a
+    contradiction (B5): the values must not conflict with each other."""
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    _observation(db, "t", "rdap_lookup", {
+        "target": "203.0.113.5", "target_kind": "ip", "status": "observed",
+        "record": {"organizations": ["Ren Yan Jun", "Liu Xiao Bao"]},
+        "source_protocol": "rdap",
+    })
+    summary = merge_task_observations(db, "t", scope)
+    assert summary.conflicts_created == 0
+    assets = {(row["asset_type"], row["normalized_value"])
+              for row in _rows(db, "SELECT * FROM asset")}
+    assert ("organization", "Ren Yan Jun") in assets
+    assert ("organization", "Liu Xiao Bao") in assets
+
+
+def test_identical_multivalued_sets_across_observations_are_not_a_conflict(tmp_path):
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    for hour in ("10", "11"):
+        _observation(db, "t", "rdap_lookup", {
+            "target": "203.0.113.5", "target_kind": "ip", "status": "observed",
+            "record": {"organizations": ["Org A Ltd", "Org B Inc"]},
+            "source_protocol": "rdap",
+        }, observed_at=f"2026-10-03T{hour}:00:00+00:00")
+    summary = merge_task_observations(db, "t", scope)
+    assert summary.conflicts_created == 0
+
+
+def test_divergent_value_sets_across_observations_still_conflict(tmp_path):
+    scope = _scope()
+    db = _setup(tmp_path, scope)
+    _observation(db, "t", "rdap_lookup", {
+        "target": "203.0.113.5", "target_kind": "ip", "status": "observed",
+        "record": {"organizations": ["Org A Ltd"]}, "source_protocol": "rdap",
+    }, observed_at="2026-10-03T10:00:00+00:00")
+    _observation(db, "t", "rdap_lookup", {
+        "target": "203.0.113.5", "target_kind": "ip", "status": "observed",
+        "record": {"organizations": ["Org A Ltd", "Org B Inc"]},
+        "source_protocol": "rdap",
+    }, observed_at="2026-10-03T11:00:00+00:00")
+    summary = merge_task_observations(db, "t", scope)
+    assert summary.conflicts_created == 1
+    conflicts = _rows(db, "SELECT * FROM asset_conflict")
+    values = json.loads(conflicts[0]["values_json"])
+    # every distinct value stays in the audit trail, nothing was picked
+    assert {item["value"] for item in values} == {"Org A Ltd", "Org B Inc"}
+
+
 def test_remerge_is_idempotent_and_preserves_first_seen(tmp_path):
     scope = _scope()
     db = _setup(tmp_path, scope)
