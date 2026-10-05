@@ -191,7 +191,7 @@ nslookup -type=ANY domain                          # DNS 交叉验证(工具 dns
 
 nmap/gh 等外部工具一律 **PATH 主动发现**,不设绝对路径、不设路径类环境变量:`where <tool>`(Windows)/`shutil.which` 判可用性。降级链:
 
-- **nmap**:有 → `nmap -sV --rate-limit 100 ...`(`--rate-limit` 是 ROE 要求,必带);无 → banner 兜底脚本(上节)。
+- **nmap**:有 → `nmap -sT -sV --max-rate 100 --host-timeout 90s ...`(限速旗标是 **`--max-rate`**,`--rate-limit` 是 NPING 的、nmap 不认;Windows 无管理员 Npcap 时默认 SYN 扫描报 "Error compiling our pcap filter",必须加 **`-sT`**;`--host-timeout` 兜住时长);无 → banner 兜底脚本(上节)。实战注记(2026-10-05):对 accept-then-drop 防护目标,`-sV` 探测必然超时拿不到版本——**先用 port-check banner,拿不到再考虑 nmap,顺序别反**。
 - **gh**:有 → gh search 三类;无 → curl 匿名低速(GitHub 泄露面节)。
 - curl/ping/nslookup/tracert Windows 自带,直接用;whois 无内置,注册信息走 rdap-lookup。
 
