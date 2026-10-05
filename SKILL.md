@@ -18,7 +18,9 @@ description: Drive attack-surface information collection from this project — i
 | L3 | 深挖(XHR/fetch 响应体、版本串、chrome-devtools 直驱) | 授权目标默认放行(仍只读) |
 | L4 | 入侵性测试(对确认目标) | 按 T0-T2 计划执行,单线程限速 |
 
-入侵性测试分层(实战模板,CeramTec R2 验证过):**T0** 端口复核(banner 抓取,单线程间隔≥1s)→ **T1** 版本指纹(对表 `[SKILL_DIR]/docs/component-checklist.md`)→ **T2a** 特定路径存在性(如 BshServlet,GET 即止)→ **T2b** 受控回显验证(如 Log4Shell,dnslog.org 经浏览器 MCP 申请/查回显,触发后主动查)。
+入侵性测试分层(实战模板,CeramTec R2 验证过):**T0** 端口复核(banner 抓取,单线程间隔≥1s)→ **T1** 版本指纹(对表 `[SKILL_DIR]/docs/component-checklist.md`)→ **T2a** 特定路径存在性(如 BshServlet,GET 即止)→ **T2b** 受控回显验证。
+
+**T2b 默认形态(2026-10-06 CeramTec R1 定稿):dnslog 优先浏览器 MCP 直驱 `https://dnslog.org`**——调用序列:`new_page(about:blank)`→`navigate_page`→snapshot 找 **Get Sub Domain** 按钮点击取子域→**curl 单线程触发 payload**→浏览器点 **Get Results** 读回显(15s 延迟后再刷一次,排除 DNS 传播延迟)。铁则:①**发包前先验通道读写两侧**再触发(dnslog.cn 实测 getdomain 可用但读侧 404,触发了也读不到;oast/interactsh 注册需 RSA 握手,curl 不可行);②payload 最小副作用序:纯 JVM 求值(`print`/`URL.connect`,无 OS 命令)> DNS 回连(`exec ping`)> 不做;不做混淆/参数 fuzz(那是过滤绕过,超出受控验证);③目标侧"连接被掐断"形态=过滤层行为而非打挂,探测后必做良性请求复核业务无恙;jndi/SQLi 探测被 404+`securityIntercept` 头类响应拒绝时如实记"不适用/已防护",不换花样重试。
 
 **止损清单**(触发即停,报告用户):业务报错/5xx 激增、WAF/IDS 拦截告警、目标侧变更联系方式、任何疑似破坏业务的副作用。
 
