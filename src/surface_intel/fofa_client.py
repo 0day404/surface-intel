@@ -135,15 +135,31 @@ class StdioJsonRpcTransport:
             return
         process = self.process
         self.process = None
-        if process.stdin is not None:
-            process.stdin.close()
+        # Explicit, ordered shutdown: close the pipes and await their transports
+        # actually closing (Proactor __del__ would otherwise surface "unclosed
+        # transport" as an unraisable the entry-point filterwarnings cannot
+        # suppress), then reap with wait() - never communicate(), which races
+        # "I/O operation on closed pipe" once stdin is already closed.
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except OSError:
+                pass
+            waiter = getattr(stream, "wait_closed", None)
+            if waiter is not None:
+                try:
+                    await asyncio.wait_for(waiter(), 2.0)
+                except (asyncio.TimeoutError, OSError):
+                    pass  # child already gone / pipe state irrelevant at teardown
         if process.returncode is None:
             process.terminate()
             try:
-                await asyncio.wait_for(process.communicate(), self.timeout)
+                await asyncio.wait_for(process.wait(), self.timeout)
             except asyncio.TimeoutError:
                 process.kill()
-                await process.communicate()
+                await process.wait()
 
     async def __aenter__(self) -> "StdioJsonRpcTransport":
         return self

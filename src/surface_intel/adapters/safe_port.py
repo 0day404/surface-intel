@@ -59,6 +59,8 @@ class SafePortAdapter:
                 "confidence": response.get("confidence", response.get("service_confidence", 0.0)),
                 "tls_sha256": response.get("tls_sha256"),
                 "tls_error": bool(response.get("tls_error", False)),
+                "error_type": response.get("error_type"),
+                "banner": response.get("banner"),
                 "probe_ms": response.get("probe_ms"),
                 "source": self.manifest.name,
             }],

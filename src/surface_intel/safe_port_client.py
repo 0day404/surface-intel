@@ -18,14 +18,19 @@ PORT_HINTS = {
 }
 TLS_LIKELY_PORTS = {443, 465, 993, 995, 8443}
 
-ConnectFunc = Callable[[str, int, float], tuple[socket.socket, bytes | None]]
+ConnectFunc = Callable[[str, int, float], tuple[socket.socket, bytes | None, str | None]]
 
 
 def _default_connect(host: str, port: int, timeout: float):
     """Real TCP connect with optional TLS wrap for TLS-likely ports.
 
-    Returns (socket, peer_cert_der_or_None). Raises TimeoutError on timeout,
-    ConnectionRefusedError on refusal, OSError for the rest.
+    Returns (socket, peer_cert_der_or_None, banner_or_None). Raises TimeoutError
+    on connect timeout, ConnectionRefusedError on refusal, OSError for the rest.
+    On plaintext (non-TLS) ports one passive recv() captures whatever the service
+    pushes first (SSH/SMTP/FTP/MySQL greetings); a read timeout there is itself
+    the finding - TCP up, service mute (the 8601 shape) - so banner stays None
+    and the probe reports open_no_banner. TLS ports never get the passive read:
+    the handshake's peer certificate is the evidence.
     """
     raw = socket.create_connection((host, port), timeout=timeout)
     if port in TLS_LIKELY_PORTS:
@@ -37,17 +42,28 @@ def _default_connect(host: str, port: int, timeout: float):
             cert = tls.getpeercert(binary_form=True)
         except (ValueError, ssl.SSLError):
             cert = None
-        return tls, cert
-    return raw, None
+        return tls, cert, None
+    banner = None
+    try:
+        raw.settimeout(min(timeout, 4.0))
+        data = raw.recv(256)
+        if data:
+            banner = data.decode("utf-8", errors="replace").strip()[:160] or None
+    except (TimeoutError, OSError):
+        banner = None  # open but silent: the service never pushed a greeting
+    return raw, None, banner
 
 
 class SafePortProbeClient:
     """Real known-port verification client (plan R6.2).
 
     One connection per explicitly authorized (host, port) pair - there is no
-    scan primitive here at all. Statuses: open / closed / timeout / filtered /
-    tls_error. Service names are port-table hints with bounded confidence; a
-    TLS peer-certificate digest is recorded when a TLS handshake succeeds.
+    scan primitive here at all. Statuses: open / open_no_banner / closed /
+    timeout / filtered / tls_error. open_no_banner means TCP accepted but the
+    service pushed no greeting within the read window - "TCP up, service mute".
+    Service names are port-table hints with bounded confidence; a TLS peer
+    certificate digest is recorded when a TLS handshake succeeds, a banner
+    snippet when a plaintext service greets first.
     """
 
     source_name = "safe_port"
@@ -64,8 +80,9 @@ class SafePortProbeClient:
         host = host.strip().lower().rstrip(".")
         sock = None
         peer = None
+        banner = None
         try:
-            sock, peer = await asyncio.to_thread(self._connect, host, int(port), self._timeout)
+            sock, peer, banner = await asyncio.to_thread(self._connect, host, int(port), self._timeout)
         except TimeoutError:
             return self._outcome(host, port, "timeout", started)
         except ConnectionRefusedError:
@@ -83,15 +100,21 @@ class SafePortProbeClient:
                     sock.close()
                 except OSError:
                     pass
+        # A TLS peer cert or a banner proves an application answered; a bare
+        # accept with neither is the silent-service shape (8601), so it gets
+        # its own status instead of blending into "open".
+        status = "open" if (peer is not None or banner is not None) else "open_no_banner"
         return self._outcome(
-            host, port, "open", started,
+            host, port, status, started,
             tls_sha256=hashlib.sha256(peer).hexdigest() if peer else None,
+            banner=banner,
         )
 
     @staticmethod
     def _outcome(host: str, port: int, status: str, started: float, *,
                  tls_sha256: str | None = None, tls_error: bool = False,
-                 error_type: str | None = None) -> dict[str, Any]:
+                 error_type: str | None = None,
+                 banner: str | None = None) -> dict[str, Any]:
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         return {
             "status": status,
@@ -102,6 +125,7 @@ class SafePortProbeClient:
             "tls_sha256": tls_sha256,
             "tls_error": tls_error,
             "error_type": error_type,
+            "banner": banner,
             "probe_ms": elapsed_ms,
             "queried_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -32,8 +32,11 @@ async def test_observed_hop_records_digest_headers_and_tls():
     assert outcome["body_sha256"] == hashlib.sha256(body).hexdigest()
     assert outcome["body_bytes"] == len(body)
     assert outcome["body_truncated"] is False
-    assert outcome["headers"] == {"server": "nginx", "content-type": "text/html"}
-    assert "set-cookie" not in outcome["headers"]  # never persisted
+    # P16: headers persist in full - the whitelist dropped exactly the
+    # evidence remote triage needs (security headers, cookie traits)
+    assert outcome["headers"]["server"] == "nginx"
+    assert outcome["headers"]["content-type"] == "text/html"
+    assert outcome["headers"]["set-cookie"] == "session=secret"  # set BY the target
     assert outcome["tls_sha256"] == hashlib.sha256(b"cert-der").hexdigest()
     assert outcome["final_url"] == "https://www.example.com/"
 

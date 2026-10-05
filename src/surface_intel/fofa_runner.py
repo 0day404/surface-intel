@@ -65,6 +65,12 @@ async def run_fofa_query(
     parent_query_id: str | None = None,
     split_reason: str | None = None,
 ) -> FofaRunResult:
+    if query.count('"') % 2:
+        # Windows shells strip inner double quotes (MSVCRT argv rules), so an
+        # odd count almost always means the query lost its quoting on the way
+        # in - fail fast locally instead of burning an FOFA round-trip on a
+        # [820000] syntax error.
+        raise ValueError("query_quote_mismatch")
     if len(query) > 4096:
         raise ValueError("query_requires_split")
     fingerprint = query_fingerprint(query)

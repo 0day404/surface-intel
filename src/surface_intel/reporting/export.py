@@ -63,6 +63,16 @@ def build_report(db: Database, task_id: str, output_dir: str | Path,
         "SELECT * FROM asset_conflict WHERE task_id=? ORDER BY rowid", (task_id,),
     )]
     observations = [dict(row) for row in db.rows("SELECT * FROM observation WHERE task_id=?", (task_id,))]
+    for row in observations:
+        # P04: expose the payload as a real object next to the raw string the
+        # runners wrote - the string field stays verbatim for existing
+        # consumers, the object spares every downstream reader a json.loads
+        raw = row.get("payload_json")
+        if raw:
+            try:
+                row["payload"] = json.loads(raw)
+            except (TypeError, ValueError):
+                row["payload"] = None
     gaps = [dict(row) for row in db.rows("SELECT * FROM gap WHERE task_id=?", (task_id,))]
     evidence = [dict(row) for row in db.rows("SELECT * FROM evidence WHERE task_id=?", (task_id,))]
     events = [dict(row) for row in db.rows("SELECT * FROM event WHERE task_id=? ORDER BY created_at", (task_id,))]

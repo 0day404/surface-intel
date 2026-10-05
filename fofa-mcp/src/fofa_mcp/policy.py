@@ -23,9 +23,9 @@ ALL_FIELDS = (
     "ip", "port", "protocol", "country", "country_name", "region", "city",
     "longitude", "latitude", "as_number", "as_organization", "host", "domain",
     "os", "server", "icp", "title", "jarm", "header", "banner", "base_protocol",
-    "link", "certs_issuer_org", "certs_issuer_cn", "certs_subject_org",
+    "link", "cert", "certs_issuer_org", "certs_issuer_cn", "certs_subject_org",
     "certs_subject_cn", "tls_ja3s", "tls_version", "product", "product_category",
-    "version", "lastupdatetime", "cname",
+    "version", "lastupdatetime", "cname", "status_code",
 )
 FIELD_SET = set(ALL_FIELDS)
 STATS_DEFAULT_FIELDS = ("title", "country")

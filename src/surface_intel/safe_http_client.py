@@ -18,12 +18,22 @@ from . import __version__
 ALLOWED_METHODS = ("GET", "HEAD")
 MAX_REDIRECTS = 5
 
-# Response headers worth keeping; everything else (cookies, auth, fingerprints)
-# is dropped before storage.
-HEADER_WHITELIST = (
-    "server", "content-type", "content-length", "location", "last-modified",
-    "etag", "via", "alt-svc", "cache-control",
-)
+# Response headers are stored in full: security headers (CSP/HSTS/X-Frame-
+# Options) and Set-Cookie traits are exactly the evidence remote triage needs,
+# and nothing here is a secret of ours - cookies were set BY the target.
+BODY_AND_HEADERS_NOTE = "headers persisted verbatim; bodies are digest-only"
+
+class FetchTimeout(TimeoutError):
+    """Timeout tagged with the phase it hit: "connect" or "app_layer".
+
+    "connect" means the TCP (or TLS handshake) never completed; "app_layer"
+    means the pipe is up but the service never answered - the distinction the
+    58.210.136.131:8601 case (FOFA saw it open, HTTP probe hung) needed.
+    """
+
+    def __init__(self, phase: str):
+        super().__init__(phase)
+        self.phase = phase
 
 FetchHop = Callable[[str, str, float], tuple[int, dict[str, str], bytes, bytes | None]]
 
@@ -34,6 +44,8 @@ def _default_fetch_hop(url: str, method: str, timeout: float):
     Returns (http_status, headers, body_bytes, peer_cert_der_or_None).
     http.client never follows redirects on its own, which is exactly what the
     safe-observation loop needs: every hop is re-authorized before connecting.
+    Timeouts raise FetchTimeout carrying their phase so remote triage can tell
+    "port unreachable" from "TCP up, service mute".
     """
     parts = urllib.parse.urlsplit(url)
     target = f"{parts.path or '/'}"
@@ -47,10 +59,17 @@ def _default_fetch_hop(url: str, method: str, timeout: float):
         connection = http.client.HTTPConnection(
             parts.hostname, parts.port or 80, timeout=timeout)
     try:
-        connection.request(method, target, headers={"Accept": "*/*", "User-Agent": f"surface-intel/{__version__}"})
-        response = connection.getresponse()
-        body = response.read(_BODY_CAP)
-        peer = connection.sock.getpeercert(binary_form=True) if parts.scheme == "https" else None
+        try:
+            connection.connect()  # TCP (+TLS handshake) phase
+        except TimeoutError:
+            raise FetchTimeout("connect") from None
+        try:
+            connection.request(method, target, headers={"Accept": "*/*", "User-Agent": f"surface-intel/{__version__}"})
+            response = connection.getresponse()
+            body = response.read(_BODY_CAP)
+            peer = connection.sock.getpeercert(binary_form=True) if parts.scheme == "https" else None
+        except TimeoutError:
+            raise FetchTimeout("app_layer") from None
         headers = {key.lower(): value for key, value in response.getheaders()}
         return response.status, headers, body, peer
     finally:
@@ -121,14 +140,21 @@ class SafeHttpFetchClient:
                 status, headers, body, peer = await asyncio.to_thread(
                     self._fetch_hop, current, method, self._timeout)
                 body = body[: self._max_body_bytes]
+            except FetchTimeout as exc:
+                return {"status": "timeout", "error_type": f"timeout_{exc.phase}",
+                        "redirect_chain": chain, "queried_at": _now()}
             except TimeoutError:
-                return {"status": "timeout", "redirect_chain": chain, "queried_at": _now()}
+                # injected fetch_hop implementations may raise bare TimeoutError
+                # with no phase info; the conservative label is connect
+                return {"status": "timeout", "error_type": "timeout_connect",
+                        "redirect_chain": chain, "queried_at": _now()}
             except ssl.SSLError as exc:
+                kind = "cert_verify" if isinstance(exc, ssl.SSLCertVerificationError) else "handshake"
                 # record the concrete handshake failure so remote triage can
                 # tell a certificate mismatch from a protocol/version problem
                 return {"status": "tls_error", "error_type": type(exc).__name__,
-                        "error": str(exc)[:200], "redirect_chain": chain,
-                        "queried_at": _now()}
+                        "tls_failure_kind": kind, "error": str(exc)[:200],
+                        "redirect_chain": chain, "queried_at": _now()}
             except (ConnectionError, OSError) as exc:
                 return {"status": "http_error", "error_type": type(exc).__name__,
                         "redirect_chain": chain, "queried_at": _now()}
@@ -154,8 +180,7 @@ class SafeHttpFetchClient:
                 "response_class": _response_class(status),
                 "final_url": current,
                 "redirect_chain": chain,
-                "headers": {key: value for key, value in headers.items()
-                            if key in HEADER_WHITELIST},
+                "headers": dict(headers),
                 "content_type": headers.get("content-type"),
                 "body_sha256": hashlib.sha256(body).hexdigest(),
                 "body_bytes": len(body),

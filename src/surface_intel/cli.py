@@ -43,7 +43,25 @@ def cmd_init(args: argparse.Namespace) -> int:
     config.write()
     db = Database(config.database_path)
     db.initialize()
-    print(json.dumps({"ok": True, **db.health()}, ensure_ascii=True))
+    scaffold = None
+    if getattr(args, "scaffold", False):
+        # D-1: pull up the project skeleton beside the task root
+        # (projects/<name>/task -> projects/<name>/{inputs,reports,data} + NOTES.md);
+        # idempotent - existing dirs and notes are left untouched
+        project_root = Path(args.task_root).parent
+        for name in ("inputs", "reports", "data"):
+            (project_root / name).mkdir(parents=True, exist_ok=True)
+        notes_path = project_root / "NOTES.md"
+        if not notes_path.exists():
+            notes_path.write_text(
+                f"# {project_root.name}\n\n"
+                "## 判定口径\n\n(待填写)\n\n"
+                "## ROE\n\n(待填写)\n\n"
+                "## 轮次\n\n| 轮次 | 日期 | 主题 | 交付物 |\n"
+                "| ---- | ---- | ---- | ------ |\n",
+                encoding="utf-8")
+        scaffold = str(project_root)
+    print(json.dumps({"ok": True, **db.health(), "scaffold": scaffold}, ensure_ascii=True))
     return 0
 
 
@@ -1073,15 +1091,27 @@ def cmd_recon(args: argparse.Namespace) -> int:
     rdap_client = configured_rdap_client()
 
     async def call():
-        return await run_full_passive_recon(
-            db, task_id=args.task_id, scope=scope,
-            fofa_client=fofa_client, ct_client=ct_client,
-            dns_client=dns_client, rdap_client=rdap_client,
-            fofa_query=args.query, fofa_size=args.size,
-            fofa_max_pages=args.max_pages, ct_domain=args.ct_domain,
-            max_rdap_ips=args.max_rdap_ips,
-            auto_amend_discovered_ips=args.auto_amend_discovered_ips,
-        )
+        try:
+            return await run_full_passive_recon(
+                db, task_id=args.task_id, scope=scope,
+                fofa_client=fofa_client, ct_client=ct_client,
+                dns_client=dns_client, rdap_client=rdap_client,
+                fofa_query=args.query, fofa_size=args.size,
+                fofa_max_pages=args.max_pages, ct_domain=args.ct_domain,
+                max_rdap_ips=args.max_rdap_ips,
+                auto_amend_discovered_ips=args.auto_amend_discovered_ips,
+            )
+        finally:
+            # P01: tear the fofa stdio subprocess down inside the event loop -
+            # its pipe transports otherwise surface "unclosed transport" as
+            # unraisables at interpreter shutdown, which entry-point
+            # filterwarnings cannot suppress (F1 real-recon smoke finding)
+            closer = getattr(fofa_client, "close", None)
+            if closer is not None:
+                try:
+                    await closer()
+                except Exception:
+                    pass  # teardown must not mask the run result
 
     try:
         result = asyncio.run(call())
@@ -1121,9 +1151,44 @@ def cmd_report(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2
+    delivered = None
+    if getattr(args, "deliver", False):
+        delivered = _deliver_report(
+            report, task_root=Path(_config(args).task_root), task_id=args.task_id,
+            round_label=args.round, title=args.title)
     print(json.dumps({"ok": True, "integrity_status": report["integrity_status"],
-                      "summary": report["summary"], "export": report["export"]}, ensure_ascii=True))
+                      "summary": report["summary"], "export": report["export"],
+                      "delivered": delivered}, ensure_ascii=True))
     return 0
+
+
+def _deliver_report(report: dict, *, task_root: Path, task_id: str,
+                    round_label: str | None, title: str | None) -> dict:
+    """D-2: double-write the deliverable workbooks to <task-root>/../reports/
+    as {round}_{date}_{title}[_analyst].xlsx. Round and title pass through from
+    the operator verbatim - the tool never invents semantics; missing ones
+    degrade to a neutral deliver_ prefix. The narrative md stays agent-authored
+    and is written straight into the same directory."""
+    import shutil
+    from datetime import datetime
+
+    export = report.get("export") or {}
+    date = datetime.now().strftime("%Y-%m-%d")
+    stem = f"{round_label or 'deliver'}_{date}_{title or task_id[:8]}"
+    deliver_dir = task_root.parent / "reports"
+    deliver_dir.mkdir(parents=True, exist_ok=True)
+    copied: dict[str, str] = {}
+    sources = []
+    if export.get("xlsx_status") == "exported" and export.get("xlsx"):
+        sources.append((Path(export["xlsx"]), f"{stem}.xlsx"))
+    analyst = export.get("analyst_report") or {}
+    if analyst.get("status") == "exported" and analyst.get("path"):
+        sources.append((Path(analyst["path"]), f"{stem}_analyst.xlsx"))
+    for src, name in sources:
+        if src.exists():
+            shutil.copy2(src, deliver_dir / name)
+            copied[name] = str(deliver_dir / name)
+    return {"dir": str(deliver_dir), "files": copied}
 
 
 def cmd_checkpoint(args: argparse.Namespace) -> int:
@@ -1170,6 +1235,8 @@ def build_parser() -> argparse.ArgumentParser:
         command.set_defaults(handler=handler)
         if name == "init":
             command.add_argument("task_root")
+            # D-1: also create the project skeleton beside the task root
+            command.add_argument("--scaffold", action="store_true")
         elif name not in {"fofa-health", "dns-health", "ct-health", "rdap-health"}:
             command.add_argument("--task-root", required=True)
         if name == "create":
@@ -1265,6 +1332,10 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--merge", nargs="+", dest="merge_tasks")
             # C3: explicit opt-in - restore redaction_map plaintexts into deliverables
             command.add_argument("--reveal-emails", action="store_true")
+            # D-2: double-write deliverables to <task-root>/../reports/
+            command.add_argument("--deliver", action="store_true")
+            command.add_argument("--round", default=None)
+            command.add_argument("--title", default=None)
         if name in {"status", "validate", "preflight", "plan", "run", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "diff-report", "scope-amend"}:
             command.add_argument("task_id")
         if name == "checkpoint":

@@ -76,10 +76,16 @@ class SafeHttpAdapter:
             "application_status": response.get("application_status", "http_response"),
             "source": self.manifest.name,
         }
+        # error travels with its error_type: a bare "timeout"/"tls_error"
+        # string hid exactly the distinction (timeout_connect vs app_layer,
+        # cert_verify vs handshake) the 8601 triage needed.
+        error_detail = observation.get("error_type") or "unknown"
         if transport_status == "timeout":
-            return AdapterResult("timed_out", observations=[observation], error="timeout")
+            return AdapterResult("timed_out", observations=[observation],
+                                 error=f"timeout:{error_detail}")
         if transport_status not in {"observed", "open", "http_response"}:
-            return AdapterResult("failed", observations=[observation], error=transport_status)
+            return AdapterResult("failed", observations=[observation],
+                                 error=f"{transport_status}:{error_detail}")
         return AdapterResult("completed", observations=[observation], cost_units=self.manifest.cost_units)
 
     async def cancel(self, action: dict[str, Any], context: TaskContext) -> AdapterResult:
