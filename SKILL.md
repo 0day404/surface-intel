@@ -28,7 +28,7 @@ description: Drive attack-surface information collection from this project — i
 **书写规则**(实测约束):
 
 1. 命令一律写全——bash 函数定义与 `VAR=…; cmd $VAR` 赋值在此环境不可靠。
-2. `--task-root` 一律绝对路径,固定 `[WORK_ROOT]/task`(`uv run --directory` 会切换 cwd,相对路径会污染工具项目——曾有 `init ./task` 把 task 目录建进工具项目的事故)。
+2. `--task-root` 一律绝对路径,固定 `[WORK_ROOT]/projects/<项目>/task`(多项目结构见「目录规范」节;`uv run --directory` 会切换 cwd,相对路径会污染工具项目——曾有 `init ./task` 把 task 目录建进工具项目的事故)。
 3. rtk 包装会对命令中的 `{{…}}` 字面量做模板展开——含占位符样式的字面量一律用字符串拼接构造,不要直接经 shell 传递。
 
 统一命令前缀:
@@ -36,6 +36,26 @@ description: Drive attack-surface information collection from this project — i
 ```
 uv run --directory [SKILL_DIR] surface-intel
 ```
+
+## 目录规范(多项目,2026-10-05 定稿)
+
+一目标一目录;**结构约定随本手册走**(占位符机制,任意新机器/新 WORK_ROOT 同构拉起),数据层不随 skill:
+
+```
+[WORK_ROOT]/
+├── projects/<project>/          ← 一目标一目录(init --scaffold 拉起)
+│   ├── task/                    ← 项目专属 task-root(独立 sqlite)
+│   │   └── reports/<task-id>/   ← 工具产出(raw/截图/baseline,永落这里)
+│   ├── inputs/                  ← scope*.json / targets*.txt
+│   ├── reports/                 ← 最终交付两件(R轮次_日期_主题.md/.xlsx)
+│   ├── data/                    ← 中间产物(banner 结果/证据摘录)
+│   └── NOTES.md                 ← 判定口径/ROE/轮次
+├── docs/  └ scripts/            ← 项目级文档与一次性脚本
+[SKILL_DIR]/scripts/             ← 跨项目通用脚本(xlsx 交付/t0 兜底,路径全参数化)
+```
+
+- **骨架一键拉起**:`uv run --directory [SKILL_DIR] surface-intel init [WORK_ROOT]/projects/<项目>/task --scaffold`——建 task/ 的同时在上级创建 `inputs/ reports/ data/` + NOTES.md 模板(幂等,已有不覆盖)。
+- **三条流向规则**:①工具产出永落 `task/reports/<task-id>/`;②交付两件由 `report --deliver` 双写至 `projects/<p>/reports/`(工具不猜语义,轮次/主题由操作方传);③`[SKILL_DIR]/scripts/` 通用脚本路径全参数化(`--result-json/--out` 等),数据列按项目在脚本内定制。
 
 ## 工作流总览
 
@@ -54,11 +74,14 @@ Phase 0 目标确认 → Phase 1 FOFA 迭代调查 → Phase 2 工具验证轮(�
 
 向用户获取:目标组织名、主域名、判定口径(集团/子公司/收购品牌/合资公司是否纳入、中国区/全球是否都收)。产出一句"资产判定口径",后续每个发现按它归类,不反复询问。
 
+**项目归属判定(先于一切命令)**:扫 `[WORK_ROOT]/projects/` 已有目录——命中同名/同目标项目时询问用户"复用(默认推荐,历史资产延续+baseline diff)还是新建";零匹配直接新建,不问。复用时新轮次追加进既有项目(reports/ 轮次前缀递增,NOTES.md 轮次表补一行)。
+
 ## Phase 1 — FOFA 迭代调查
 
 工具:MCP `fofa-health`(先行)→ `fofa_search_structured`(domain/ip/host/body/icp/icon_hash/status_code)/`fofa_search`(DSL)/`fofa_search_next`(翻页)/`fofa_stats`/`fofa_host`(单 IP 聚合)。
 
 - **维度展开清单**(每个主域至少跑前四项):`domain=`、解析 IP、IP→C 段反查 `ip="x.x.x.0/24"`、证书主体/SAN(`cert=`)、ICP 备案主体、`body="组织名"`、`title=` 关键词、`icon_hash=` 同源扩展。
+- **fofa-mcp 字段注意(P13)**:fields 白名单已对照 FOFA v2 官方字段表扩至全量(`cert`/`status_code` 均可用,7af95e0 起);`icp=` 查询消耗企业点数,MCP 工具要求显式 `confirm=true` 才放行。
 - **Pivot 策略**:每个新 IP/新段/新域名都问一遍"还有谁在这台上/这段里";把 FOFA 结果里的解析 IP、跳转目标、证书 SAN 全部并入待查集。
 - **每轮查询上限 20 次**;触限时汇报本轮成果并征询是否续烧;FOFA 配额报错即停。
 - **整轮无新发现 → 出循环**进 Phase 2。
@@ -84,36 +107,52 @@ curl -sS --max-time 20 "https://urlscan.io/api/v1/search/?q=domain:example.com&s
 - **urlscan 判读**:results[].task/page 字段给 title、IP、ASN——等于白嫖他人扫描的指纹库;`q=domain:域 AND page.domain:*` 可细化。
 - 命中一律入发现集(来源=cdx/urlscan),与 FOFA 已知集 diff 后按 Phase 3 回灌。
 
-### GitHub 泄露面
+### GitHub 泄露面(gh 优先,PATH 主动发现)
+
+`gh` 有则默认用(先 `where gh` 确认 PATH 可见,不设绝对路径);无则 curl 匿名低速慢测(仓库/用户搜索可用,code search 需鉴权,限 ~10 req/min)。**仓库/用户/代码三类都搜**:
 
 ```bash
+# 代码搜索(需 gh 认证;查询词:主域裸串+password/secret/token/jdbc/.env)
 gh search code '"example.com" password' --limit 20 --json repository,path,htmlUrl
 gh search code '"example.com" jdbc' --limit 20 --json repository,path,htmlUrl
+# 仓库与用户/组织
 gh search repos '目标org名' --limit 30 --json fullName,description,updatedAt
+gh search users '目标org名' --limit 20 --json login,type,bio
 ```
 
 - 查询词三组:主域裸串 + password/secret/token/jdbc/.env;组织名/RDAP org;`filename:.env`/`filename:id_rsa` 类组合。
 - 判读:内部端点、邮箱→人名映射、误提交配置(.env/kubeconfig/私有仓库串)。**只记录存在性(html_url+path),不拉取内容、不试用任何凭据**;命中入发现集(来源=github),敏感度高的直接进风险表 P1-P2。
+
+### Gitee 泄露面(国内补面,三通道)
+
+GitHub 搜不到的国内自建/镜像仓库在 Gitee 补一遍,三通道按稳定性排序:
+
+1. **API v5**(稳定,匿名限频宽松):`curl -sS "https://gitee.com/api/v5/search/repositories?q=组织名&per_page=20"`,同型 `search/issues?q=域名`(Issue/仓库/用户三入口)。
+2. **网页代码搜索**(脆弱、限频,仅轻量使用):`https://gitee.com/search?type=code&q=<域名或组织名>`——HTML 解析命中列表;高频触发滑块,失败即退回通道 1。
+3. 官方 code API 预留(开放后替换通道 2)。
+
+判读同 GitHub:只记录存在性(url+path),不拉取内容、不试用凭据;命中入发现集(来源=gitee)。
 
 ## Phase 2 — surface-intel 验证轮
 
 把 Phase 1 的发现固化为任务:
 
 ```bash
-# 1. 宽范围 scope.json(把 FOFA 发现的全部根域/变体/IP 段都写进去;模板见下)
-uv run --directory [SKILL_DIR] surface-intel init [WORK_ROOT]/task
-uv run --directory [SKILL_DIR] surface-intel create --task-root [WORK_ROOT]/task --scope scope.json
+# 1. 项目骨架+宽范围 scope.json(把 FOFA 发现的全部根域/变体/IP 段都写进去;模板见下)
+uv run --directory [SKILL_DIR] surface-intel init [WORK_ROOT]/projects/<项目>/task --scaffold
+uv run --directory [SKILL_DIR] surface-intel create --task-root [WORK_ROOT]/projects/<项目>/task --scope [WORK_ROOT]/projects/<项目>/inputs/scope.json
 
 # 2. 被动验证+归并(--auto-amend-discovered-ips 常开:DNS 揭示 IP 自动补授权并跑 RDAP)
-uv run --directory [SKILL_DIR] surface-intel recon <task-id> --task-root [WORK_ROOT]/task --fofa-query '<主域查询>' --ct-domain <主域> --auto-amend-discovered-ips --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel recon <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --fofa-query '<主域查询>' --ct-domain <主域> --auto-amend-discovered-ips --real --confirm-real
 
 # 3. 主动验证:对 FOFA 发现的高价值目标(管理后台/网关/非常见端口)逐个验证
-uv run --directory [SKILL_DIR] surface-intel http-observe <task-id> --task-root [WORK_ROOT]/task --url https://host [--allow-hosted-third-party] --real --confirm-real
-uv run --directory [SKILL_DIR] surface-intel port-check <task-id> --task-root [WORK_ROOT]/task --target host --port 8899 --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel http-observe <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --url https://host [--allow-hosted-third-party] --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel port-check <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --target host --port 8899 --real --confirm-real
 ```
 
-- 端口不在标准表(见模板)时先 amend:`scope-amend <task-id> --task-root [WORK_ROOT]/task --ports <p> --allow-active --confirm`。
+- 端口不在标准表(见模板)时先 amend:`scope-amend <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --ports <p> --allow-active --confirm`。
 - 归并为 third_party 的 IP 承载公司站点时,http-observe/port-check 直接加 `--allow-hosted-third-party`(会记一条 override review 项,合理)。
+- **recon 复合 OR 查询(P14)**:Windows shell 会剥内层双引号(MSVCRT 规则),`--fofa-query 'domain="a" OR domain="b"'` 到达 FOFA 时引号已被吃掉 → 语法错 [820000]。工具侧防线:奇数个 `"` 时本地 fail-fast(`query_quote_mismatch`,不烧配额,7af95e0 起)。**多域复合查询一律走 MCP 直查**(JSON 参数不经 shell);单域查询经 shell 用无内层引号形态(如 `--fofa-query domain=example.com`,简单值可不带引号)。
 - 指纹命中已知组件(Citrix/F5/Ivanti/用友 NC/…)时,**先查 `[SKILL_DIR]/docs/component-checklist.md` 对表**再写风险点——CVE 线索不凭记忆;条目随实战追加。
 - FOFA 已确认的目标不必全量重扫——工具轮的价值是**证据化**(状态码/server/TLS/端口时延入 observation+evidence)与 **FOFA 看不到的层**(CT SAN、DNS 记录、RDAP 注册数据、跳转链)。
 
@@ -131,23 +170,33 @@ nslookup -type=ANY domain                          # DNS 交叉验证(工具 dns
 
 分工:**curl 拿全量原始返回包供分析**(安全头缺失、指纹、跳转链),**http-observe 把同一事实证据化入库**(observation+evidence 可追溯)——高价值目标两者都做,普通目标 http-observe 即可。
 
+**T0 端口复核(L4 第一层,实战模板 CeramTec R2)**:常规走 `port-check`——D-3 起非 TLS 端口 connect 后被动读一次 banner(SSH/SMTP/FTP/MySQL 问候语直接落 evidence),连接后无问候的静默端口报 `open_no_banner`("TCP 通但服务不应答",8601 形态),TLS 端口以证书摘要为证。工具不可用时的兜底:`python [SKILL_DIR]/scripts/t0_banner_grab.py --targets-file targets.json --out <项目>/data/t0-results.json`(单线程/间隔≥1s/recv 256 即止)。
+
+### 工具发现约定(PATH 主动发现,P19)
+
+nmap/gh 等外部工具一律 **PATH 主动发现**,不设绝对路径、不设路径类环境变量:`where <tool>`(Windows)/`shutil.which` 判可用性。降级链:
+
+- **nmap**:有 → `nmap -sV --rate-limit 100 ...`(`--rate-limit` 是 ROE 要求,必带);无 → banner 兜底脚本(上节)。
+- **gh**:有 → gh search 三类;无 → curl 匿名低速(GitHub 泄露面节)。
+- curl/ping/nslookup/tracert Windows 自带,直接用;whois 无内置,注册信息走 rdap-lookup。
+
 ### 批量探测:工具原生 --targets(首选)与 curl 循环(补刀)
 
-批量**证据化入库**用工具原生参数(5901192 起):`[WORK_ROOT]/targets.txt` 每行一条(http-observe: URL 或裸 host 自动补 `https://`;port-check: `host:port`),`#` 注释与空行跳过,串行逐台、单台失败不中断,退出码 0=全部 completed/1=有失败:
+批量**证据化入库**用工具原生参数(5901192 起):`[WORK_ROOT]/projects/<项目>/inputs/targets.txt` 每行一条(http-observe: URL 或裸 host 自动补 `https://`;port-check: `host:port`),`#` 注释与空行跳过,串行逐台、单台失败不中断,退出码 0=全部 completed/1=有失败:
 
 ```bash
-uv run --directory [SKILL_DIR] surface-intel http-observe <task-id> --task-root [WORK_ROOT]/task --targets [WORK_ROOT]/targets.txt --real --confirm-real
-uv run --directory [SKILL_DIR] surface-intel port-check <task-id> --task-root [WORK_ROOT]/task --targets [WORK_ROOT]/targets-ports.txt --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel http-observe <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --targets [WORK_ROOT]/projects/<项目>/inputs/targets.txt --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel port-check <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --targets [WORK_ROOT]/projects/<项目>/inputs/targets-ports.txt --real --confirm-real
 ```
 
 curl 层(工具不覆盖的原始返回包/跳转链)仍用 for 循环:
 
 ```bash
 # 批量快扫:仅头,集中看状态行+server/x-powered-by
-for host in $(cat [WORK_ROOT]/targets.txt); do curl -sS -I --max-time 8 "https://$host" 2>&1 | head -6 | sed "s|^|$host |"; done
+for host in $(cat [WORK_ROOT]/projects/<项目>/inputs/targets.txt); do curl -sS -I --max-time 8 "https://$host" 2>&1 | head -6 | sed "s|^|$host |"; done
 
 # 批量全跳转链与最终落点
-for host in $(cat [WORK_ROOT]/targets.txt); do curl -sSL --max-time 15 -o /dev/null -w "$host %{url_effective} %{http_code}\n" "https://$host"; done
+for host in $(cat [WORK_ROOT]/projects/<项目>/inputs/targets.txt); do curl -sSL --max-time 15 -o /dev/null -w "$host %{url_effective} %{http_code}\n" "https://$host"; done
 ```
 
 - 循环变量 `$host` 可靠;**不要**在循环里写 `VAR=…` 赋值或 bash 函数(本环境不可靠,见书写规则)。
@@ -156,17 +205,17 @@ for host in $(cat [WORK_ROOT]/targets.txt); do curl -sSL --max-time 15 -o /dev/n
 ### 浏览器深挖层:browser-observe(已实测可用,2026-10-05)
 
 ```bash
-uv run --directory [SKILL_DIR] surface-intel browser-observe <task-id> --task-root [WORK_ROOT]/task --url https://host --real --confirm-real
+uv run --directory [SKILL_DIR] surface-intel browser-observe <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --url https://host --real --confirm-real
 ```
 
 - 拉起 @playwright/mcp(0.0.83 返回 Markdown,工具已适配解析):落库 final_url/title/网络请求清单(method/url/status,`static:true` 全收)/console 错误数;截图落 `reports/<task-id>/screenshots/observation-*.png`。
 - 观测价值:登录页/SPA/WAF 盾站的**真实渲染面**——curl 看不到的 JS 挑战、跳转与错误提示;第三方 origin 自动判定(third_party_origins)。
-- 边界:仅 GET 级导航,登录/下载/状态变更被 adapter 拦;0.0.83 的 navigate 不暴露 HTTP 状态码,status_code 如实为 null(状态看 network_summary);部分收集失败不吞,记 partial_collection_errors。
+- 边界:仅 GET 级导航,登录/下载/状态变更被 adapter 拦;0.0.83 的 navigate 不暴露 HTTP 状态码,status_code 如实为 null(状态看 network_summary);title 可能截断(如"登录 - ")或 SPA 抽空为 null——形状如实落库,不猜补;部分收集失败不吞,记 partial_collection_errors。
 - npx 首拉包 1-2 分钟属正常;Windows spawn 的 npx.cmd shim 已自动处理。
 
 ### chrome-devtools 直驱深挖层(已实测,2026-10-05;使用项目的 .mcp.json 已配好,重启会话后以 MCP 工具直用)
 
-定位:看与取证——**XHR/fetch/文档响应体**、JS 渲染面、evaluate 版本串;与 browser-observe 不互替(那个进工具证据链,这个直驱深挖高价值入口)。使用项目的 `.mcp.json` 建议带 `--headless --isolated --workspace=[WORK_ROOT]/task` 旗标(workspace 决定文件写入边界)。
+定位:看与取证——**XHR/fetch/文档响应体**、JS 渲染面、evaluate 版本串;与 browser-observe 不互替(那个进工具证据链,这个直驱深挖高价值入口)。使用项目的 `.mcp.json` 建议带 `--headless --isolated --workspace=[WORK_ROOT]/projects/<项目>/task` 旗标(workspace 决定文件写入边界)。
 
 调用序列(必按此序,实测两次踩坑换来的):
 
@@ -178,7 +227,7 @@ uv run --directory [SKILL_DIR] surface-intel browser-observe <task-id> --task-ro
 
 铁则:`pageId` 必填(pageIdRouting 默认 true)且**不跨 server 会话**;一切文件写入只认 `--workspace` 目录(默认仅 OS 临时目录,不设必被拒"Access denied");UA 串以 HeadlessChrome 前缀如实标注 headless。
 
-分步命令(需要细控时):`fofa-search`(支持 `--domain a,b` 逗号多域)/`ct-search`/`dns-lookup`/`rdap-lookup`/`merge`(纯本地幂等)/`validate`。运行控制:`status`/`pause`/`resume`/`cancel`/`checkpoint`/`recover`(无终态动作→unknown,先看 checkpoint 再续)/`baseline-save`/`baseline-diff`(均 `--task-root [WORK_ROOT]/task`)。**资产监控桥**:`diff-report <task-id> [--baseline CP] [--against CP] [--output P]`——把 checkpoint 差量渲染成"新出现/消失/变化/重现"markdown 一页,缺省落 `reports/<task-id>/`,复查轮标配(5901192 起)。
+分步命令(需要细控时):`fofa-search`(支持 `--domain a,b` 逗号多域)/`ct-search`/`dns-lookup`/`rdap-lookup`/`merge`(纯本地幂等)/`validate`。运行控制:`status`/`pause`/`resume`/`cancel`/`checkpoint`/`recover`(无终态动作→unknown,先看 checkpoint 再续)/`baseline-save`/`baseline-diff`(均 `--task-root [WORK_ROOT]/projects/<项目>/task`)。**资产监控桥**:`diff-report <task-id> [--baseline CP] [--against CP] [--output P]`——把 checkpoint 差量渲染成"新出现/消失/变化/重现"markdown 一页,缺省落 `reports/<task-id>/`,复查轮标配(5901192 起)。
 
 ## Phase 3 — 新发现回灌判定
 
@@ -196,8 +245,12 @@ diff 工具轮新揭示 vs FOFA 已知集,任何一项命中就回 Phase 1 做�
 ## Phase 4 — 交付
 
 ```bash
-uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/task [--reveal-emails]
-uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-root [WORK_ROOT]/task
+# 单任务报告(工具产出永落 task/reports/<task-id>/)
+uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task [--reveal-emails]
+# 交付双写:--deliver 把两份 xlsx 复制到 projects/<项目>/reports/,命名 {轮次}_{日期}_{主题}.xlsx(轮次/主题由操作方传,工具不猜语义)
+uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --deliver --round R2 --title 中国区资产核查
+# 多任务合并工作簿
+uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-root [WORK_ROOT]/projects/<项目>/task
 ```
 
 **最终交付物固定两件**：
@@ -212,9 +265,9 @@ uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-
    | 4   | 风险点           | 紧跟资产表：优先级(P1-P4)/资产/发现/CVE 线索/依据/建议/状态                                                                                                                                                                                            |
    | 5   | 站点与服务       | 按宿主 IP 分组；"类型"列区分官网/BPM/VPN/云盘等，"管理面"列(是/否)吸收登录入口专项；**"HTTP 状态"与"返回头摘要"两列**体现返回包（server/content-type/x-powered-by/via/location/安全头缺失标注）；完整原始返回包(curl -sS -i)进 md 附录，仅收高价值目标 |
 
-   美观规范：表头深色填充白字、冻结首行、自动筛选、风险优先级条件着色（P1 红/P2 橙/P3 黄/P4 灰）、归属判定着色（自有绿/关联橙/第三方灰）、sheet tab 分区着色。生成方式：工作项目 `[WORK_ROOT]/scripts/build_deliverable_xlsx.py`（openpyxl，首次使用时创建），数据源 = `report --merge` 产物 + observation/evidence + 代理分析列（风险表/归属判定/关系洞察由代理以结构化数据提供）。
+   美观规范：表头深色填充白字、冻结首行、自动筛选、风险优先级条件着色（P1 红/P2 橙/P3 黄/P4 灰）、归属判定着色（自有绿/关联橙/第三方灰）、sheet tab 分区着色。生成方式：`uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py --result-json <项目>/task/reports/<task-id>/result.json --out <项目>/reports/<轮次>_<日期>_<主题>.xlsx`(脚本随 skill 走,路径全参数化;内含 CeramTec R2 实战样例,发现集/风险/归属数据列按项目在脚本内替换),数据源 = `report --merge` 产物 + observation/evidence + 代理分析列（风险表/归属判定/关系洞察由代理以结构化数据提供）。
 
-2. **md 叙事报告**——形态对齐工作项目内既有范例(如 `ceramtec-fofa-report.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。
+2. **md 叙事报告**——形态对齐项目内既有范例(如 ceramtec 项目 `R1_2026-10-04_全球面FOFA.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。md 直写 `projects/<项目>/reports/`(与 xlsx 同名配对)。
 
 工具 analyst_report.xlsx 是数据底稿；email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
 
@@ -236,17 +289,17 @@ uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-
 - **默认全通配,收集最大化**:`["*"] + 0.0.0.0/0/::/0` 一次放行一切,工具永不因 scope 拦截,也不需要任何域名/IP amend。注意 `is_in_scope` 是 fnmatch——枚举式清单里子域必须显式写 `*.domain`。代价只有呈现层:工具报告归属档全部标"A-已确认",多租户/第三方甄别由叙事报告承担(本来也是代理分析,不依赖工具标签)。若某次交付需要归属档列,再换枚举式清单(列出真实根域+变体+IP 段)。
 - `active_testing_level` 取 `passive_only`/`safe_discovery`/`safe_probe`/`intrusive_test`,适配器实际放行后两档;非法值静默降级为 `passive_only`(create 会给 warnings)——两字段成对写。
 - **唯一保留的动态门控是端口**:工具没有"全端口"原语,`allowed_ports` 之外的端口 port-check 会被拦。标准表已覆盖常见服务与非常见管理口;发现表外端口(如 8601、4172)先一条命令补:
-  `scope-amend <task-id> --task-root [WORK_ROOT]/task --allow-active --ports <p> --confirm`
+  `scope-amend <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --allow-active --ports <p> --confirm`
 
 ### scope-amend 速查(按需,全部直接 --confirm)
 
 ```bash
 # 补端口(全通配下最常见的 amend)
-uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/task --allow-active --ports 8601,4172 --reason "新服务端口" --confirm
+uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --allow-active --ports 8601,4172 --reason "新服务端口" --confirm
 
 # 仅当使用枚举式 scope 时才需要(全通配下用不到):
-uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/task --add-ips 203.0.113.5 --reason "调查揭示" --confirm
-uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/task --add-domains new.example.net --confirm-new-domain --reason "CT/跳转发现" --confirm
+uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --add-ips 203.0.113.5 --reason "调查揭示" --confirm
+uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --add-domains new.example.net --confirm-new-domain --reason "CT/跳转发现" --confirm
 ```
 
 ## 操作注意
@@ -257,7 +310,11 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 - `port-check` 的 `allowed_ports` 空清单=零授权;`--allow-hosted-third-party` 只解除 third_party 拦截,cdn/waf/lb/cloud_hosting 始终拦。
 - merge 幂等可重复;同一 RDAP 记录多组织名不再互报 conflict,跨观察值集分歧才报 unresolved。
 - FOFA MCP(内置子项目 `[SKILL_DIR]/fofa-mcp`,仍按独立子项目对待——未经批准不修改,改动经本仓库 git 追溯,历史基线=原仓 `E:\Work\Copilot\fofa-mcp` 冻结于 `e851ed1`)未配置时返回 `not_configured`,不伪造结果;凭据只由它自己从 `.env` 读取。
-- Windows/Python 3.14 的 asyncio `unclosed transport` 警告已在入口抑制。
+- Windows/Python 3.14 的 asyncio `unclosed transport` 警告**已根治**(7af95e0):cmd_recon finally 显式关闭 fofa stdio 客户端,close() 有序关停管道(`wait_closed`/`wait` 替代 `communicate` 竞态)。若再见到 "Exception ignored",先查新命令是否漏了 finally close。
+- http-observe 错误分类已细分(P03):`timeout` 带 `error_type=timeout_connect|timeout_app_layer`(端口不通 vs TCP 通服务不应答,8601 判读靠它),`tls_error` 带 `tls_failure_kind=cert_verify|handshake`;adapter 层 error 形如 `timeout:timeout_app_layer`。
+- port-check 已读 banner(D-3):非 TLS 端口落 `banner` 字段;静默端口 status=`open_no_banner`(区别于 open)——报告判读注意语义。
+- `create` 无 `--objective` 参数(P15 备忘):目标描述写进项目 NOTES.md,不进工具库。
+- 环境噪音(P17):DNS/CDX 首查超时重试合法(解析链冷启动);urlscan 免费层仅 30 天窗口,更早历史靠 CDX。
 
 ## 工具侧状态
 

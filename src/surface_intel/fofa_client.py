@@ -144,10 +144,20 @@ class StdioJsonRpcTransport:
             if stream is None:
                 continue
             try:
-                stream.close()
-            except OSError:
+                stream.close()  # StreamWriter only - StreamReader has no close()
+            except (AttributeError, OSError):
                 pass
-            waiter = getattr(stream, "wait_closed", None)
+            waiter = getattr(stream, "wait_closed", None)  # StreamWriter only
+            if waiter is None:
+                # StreamReader (stdout): close its pipe transport directly,
+                # else Proactor __del__ surfaces it as an unraisable
+                transport = getattr(stream, "transport", None)
+                if transport is not None:
+                    try:
+                        transport.close()
+                    except OSError:
+                        pass
+                    waiter = getattr(transport, "wait_closed", None)
             if waiter is not None:
                 try:
                     await asyncio.wait_for(waiter(), 2.0)
@@ -160,6 +170,16 @@ class StdioJsonRpcTransport:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+        # 3.14 Proactor quirk: even with both pipes closed and the child
+        # reaped, the subprocess transport itself lingers unclosed - its
+        # __del__ then reprs the dead pipes and raises "I/O operation on
+        # closed pipe" as an unraisable. Close it explicitly.
+        subprocess_transport = getattr(process, "_transport", None)
+        if subprocess_transport is not None:
+            try:
+                subprocess_transport.close()
+            except OSError:
+                pass
 
     async def __aenter__(self) -> "StdioJsonRpcTransport":
         return self
