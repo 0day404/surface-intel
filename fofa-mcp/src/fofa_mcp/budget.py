@@ -23,11 +23,17 @@ class Budget:
     estimated_fpoints_used: int = 0
     actual_fpoints_used: int = 0
     results_seen: int = 0
+    task_id: str = "default"
 
     def reserve_request(self) -> None:
         if self.requests_used >= self.max_requests:
+            # R3 lesson: a caller that meant to use its own pool but fell
+            # into "default" only found out from this error. Name the pool
+            # and name the escape hatch.
             raise PolicyDeniedError(
-                f"request budget exhausted ({self.max_requests} requests)"
+                f"request budget exhausted ({self.max_requests} requests) "
+                f"for task '{self.task_id}' - pass a different task_id to "
+                "start a fresh pool"
             )
         if self.estimated_fpoints_used >= self.max_estimated_fpoints:
             raise PolicyDeniedError(
@@ -80,7 +86,7 @@ class BudgetRegistry:
     def get(self, task_id: str) -> Budget:
         if task_id not in self._budgets:
             _evict_oldest(self._budgets, MAX_TRACKED_TASKS)
-            self._budgets[task_id] = Budget(**self._limits)
+            self._budgets[task_id] = Budget(**self._limits, task_id=task_id)
         return self._budgets[task_id]
 
     def snapshot(self, task_id: str = "default") -> dict[str, int]:

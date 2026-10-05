@@ -185,7 +185,7 @@ nslookup -type=ANY domain                          # DNS 交叉验证(工具 dns
 
 分工:**curl 拿全量原始返回包供分析**(安全头缺失、指纹、跳转链),**http-observe 把同一事实证据化入库**(observation+evidence 可追溯)——高价值目标两者都做,普通目标 http-observe 即可。
 
-**T0 端口复核(L4 第一层,实战模板 CeramTec R2)**:常规走 `port-check`——D-3 起非 TLS 端口 connect 后被动读一次 banner(SSH/SMTP/FTP/MySQL 问候语直接落 evidence),连接后无问候的静默端口报 `open_no_banner`("TCP 通但服务不应答",8601 形态),TLS 端口以证书摘要为证。工具不可用时的兜底:`python [SKILL_DIR]/scripts/t0_banner_grab.py --targets-file targets.json --out <项目>/data/t0-results.json`(单线程/间隔≥1s/recv 256 即止)。
+**T0 端口复核(L4 第一层,实战模板 CeramTec R2)**:常规走 `port-check`——D-3 起非 TLS 端口 connect 后被动读一次 banner(SSH/SMTP/FTP/MySQL 问候语直接落 evidence),连接后无问候的静默端口报 `open_no_banner`("TCP 通但服务不应答",8601 形态),TLS 端口以证书摘要为证。R3 修复起 `open_no_banner` 内部再分两形态:`error_type=closed_after_accept`=accept 后干净 EOF 即关(tarpit/加固形态,官网 3306 形);无 error_type=静默挂住不动(8601 形)。工具不可用时的兜底:`python [SKILL_DIR]/scripts/t0_banner_grab.py --targets-file targets.json --out <项目>/data/t0-results.json`(单线程/间隔≥1s/recv 256 即止)。
 
 ### 工具发现约定(PATH 主动发现,P19)
 
@@ -332,7 +332,8 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 - FOFA MCP(内置子项目 `[SKILL_DIR]/fofa-mcp`,仍按独立子项目对待——未经批准不修改,改动经本仓库 git 追溯,历史基线=原仓 `E:\Work\Copilot\fofa-mcp` 冻结于 `e851ed1`)未配置时返回 `not_configured`,不伪造结果;凭据只由它自己从 `.env` 读取。
 - Windows/Python 3.14 的 asyncio `unclosed transport` 警告**已根治**(7af95e0):cmd_recon finally 显式关闭 fofa stdio 客户端,close() 有序关停管道(`wait_closed`/`wait` 替代 `communicate` 竞态)。若再见到 "Exception ignored",先查新命令是否漏了 finally close。
 - http-observe 错误分类已细分(P03):`timeout` 带 `error_type=timeout_connect|timeout_app_layer`(端口不通 vs TCP 通服务不应答,8601 判读靠它),`tls_error` 带 `tls_failure_kind=cert_verify|handshake`;adapter 层 error 形如 `timeout:timeout_app_layer`。
-- port-check 已读 banner(D-3):非 TLS 端口落 `banner` 字段;静默端口 status=`open_no_banner`(区别于 open)——报告判读注意语义。
+- port-check 已读 banner(D-3):非 TLS 端口落 `banner` 字段;静默端口 status=`open_no_banner`(区别于 open),`error_type=closed_after_accept` 区分 accept-即关(tarpit)与静默挂住——报告判读注意语义。
+- http-observe 的 https 失败 error 带 `;plain_http_may_be_available` 提示(R3 修复起):同主机 80 明文常可达(R3 的 pre/dev/biolox 都是 401 在 :80),此时批量清单补一行 `http://<host>` 即可拿到证据。
 - `create` 无 `--objective` 参数(P15 备忘):目标描述写进项目 NOTES.md,不进工具库。
 - 环境噪音(P17):DNS/CDX 首查超时重试合法(解析链冷启动);urlscan 免费层仅 30 天窗口,更早历史靠 CDX。
 
@@ -347,6 +348,8 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 2026-10-05 **D 包批量修复完成**:fofa-mcp `e851ed1`(0.2.0,76 tests)——`fofa_search`/`fofa_search_structured` 现在登记 next 游标,`fofa_search_next(next_token, cursor_page=上一页+1)` 翻页流程真正可用(游标绑定 task_id/query/fields,进程内存态,服务重启即失效重查);配额/F 点不足=不可重试立即换号,全账号失败抛最后一个真实错误;单次调用总时限 90s。surface-intel `63bd6a3`(0.2.0)——playwright health 判活修复+截图落 `reports/<task-id>/screenshots/`+网络摘要真正落库;限速默认接线(ct 2s/rdap 1s,env `SURFACE_INTEL_MIN_INTERVAL_<ADAPTER>` 可调);无 action 行任务 report integrity 正常报 complete;baseline-save 不再破坏 resume;`baseline-diff --baseline <id> --output <path>` 支持任意两次对比。此前 2026-10-04 的 18 项修复见 master `72f83e3`(checkpoint:`docs/checkpoints/FIX-2026-10-04-issues-batch.md`)。行为与手册不符时,先查 `[WORK_ROOT]/docs/surface-intel-issues.md` 与两个 checkpoint,再更新本手册。
 
 2026-10-05 **C+ 修复批落地**(`7af95e0`+`bc9463b`,448+76 tests 双绿):P01 recon 泄漏根治(close 有序关停+3.14 StreamReader/_transport 坑)、P02 引号 fail-fast、P03 错误分类阶段化(timeout_connect/timeout_app_layer、tls_failure_kind)、P04 result.json payload 对象展开(保留 payload_json 字符串)、P05 fofa-mcp fields 全量(cert/status_code)、P16 headers 全量落库(白名单删除)、D-1 init --scaffold、D-2 report --deliver/--round/--title 双写、D-3 port-check banner+open_no_banner。通用脚本迁入 `scripts/`(xlsx 交付路径参数化、t0 banner 兜底);目录规范改多项目 `projects/<p>/` 结构;junction 单源化(`~/.claude/skills/surface-intel` → 本仓);授权节改写为锚定使用方对具体目标持有的授权书(P07/P08,用户 2026-10-05 批复措辞)。
+
+2026-10-05 **R3 复测暴露问题修复批**(451+77 tests):①fofa-mcp 每 task 预算默认 20→100(`FOFA_MAX_REQUESTS_PER_SESSION`),exhausted 错误消息带池名与重置提示(`for task 'default' - pass a different task_id...`,R3 落错池教训);②banner 脱敏收紧——值级打码只认凭据赋值样式(`password=`,JSON `"token":`,URL 查询串),协议词不含赋值分隔符不再连坐(R3 MySQL 8.0.36 banner 因 `mysql_native_password` 认证插件名整串被 REDACTED 的教训);③port-check `closed_after_accept` 分类(accept 后干净 EOF= tarpit/加固,区分静默挂住);④http-observe tls_error 附 `hint=plain_http_may_be_available`(R3: pre/dev/biolox 的 401 证据都在 :80 明文)。
 
 2026-10-05 **D-2 修订(操作方裁定,R3 复测轮触发,两步落地)**:①交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 项目数据版),风险点 sheet **不设"建议"列**(7 列:编号/优先级/资产/发现/CVE 线索/依据/状态,处置动作走 md 叙事);②`report` 默认 **json-only**——唯一中间产物 `result.json`,`result.xlsx`/`analyst_report.xlsx` 降为 `--xlsx`/`include_xlsx` opt-in 的人工底稿,**`--deliver`/`--round`/`--title` 与占位复制机制删除**(最终交付 xlsx 由 5-sheet 生成器直接 `--out` 交付目录;`report --merge` 合并工作簿暂保持现状)。交付目录固定两件:`R{n}_{日期}_{主题}.xlsx + .md`。
 

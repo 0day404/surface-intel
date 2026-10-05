@@ -15,8 +15,8 @@ def _connect_ok(host, port, timeout):
             pass
 
     cert = b"der-cert" if port in {443, 8443} else None
-    # D-3: (socket, peer_cert, banner) - stubs never greet
-    return FakeSock(), cert, None
+    # D-3: (socket, peer_cert, banner, closed_after_accept) - stubs never greet
+    return FakeSock(), cert, None, False
 
 
 def _connect_refuse(host, port, timeout):

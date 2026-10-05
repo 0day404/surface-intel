@@ -18,19 +18,24 @@ PORT_HINTS = {
 }
 TLS_LIKELY_PORTS = {443, 465, 993, 995, 8443}
 
-ConnectFunc = Callable[[str, int, float], tuple[socket.socket, bytes | None, str | None]]
+ConnectFunc = Callable[[str, int, float],
+                        tuple[socket.socket, bytes | None, str | None, bool]]
 
 
 def _default_connect(host: str, port: int, timeout: float):
     """Real TCP connect with optional TLS wrap for TLS-likely ports.
 
-    Returns (socket, peer_cert_der_or_None, banner_or_None). Raises TimeoutError
-    on connect timeout, ConnectionRefusedError on refusal, OSError for the rest.
-    On plaintext (non-TLS) ports one passive recv() captures whatever the service
-    pushes first (SSH/SMTP/FTP/MySQL greetings); a read timeout there is itself
-    the finding - TCP up, service mute (the 8601 shape) - so banner stays None
-    and the probe reports open_no_banner. TLS ports never get the passive read:
-    the handshake's peer certificate is the evidence.
+    Returns (socket, peer_cert_der_or_None, banner_or_None,
+    closed_after_accept). Raises TimeoutError on connect timeout,
+    ConnectionRefusedError on refusal, OSError for the rest. On plaintext
+    (non-TLS) ports one passive recv() captures whatever the service pushes
+    first (SSH/SMTP/FTP/MySQL greetings); a read timeout there is itself the
+    finding - TCP up, service mute (the 8601 shape) - so banner stays None
+    and the probe reports open_no_banner. A clean EOF (recv() == b"") sets
+    closed_after_accept: the peer accepted and immediately dropped - the
+    tarpit/hardening shape - which the probe reports via error_type so it is
+    distinguishable from a silent hold. TLS ports never get the passive
+    read: the handshake's peer certificate is the evidence.
     """
     raw = socket.create_connection((host, port), timeout=timeout)
     if port in TLS_LIKELY_PORTS:
@@ -42,16 +47,20 @@ def _default_connect(host: str, port: int, timeout: float):
             cert = tls.getpeercert(binary_form=True)
         except (ValueError, ssl.SSLError):
             cert = None
-        return tls, cert, None
+        return tls, cert, None, False
     banner = None
+    closed_after_accept = False
     try:
         raw.settimeout(min(timeout, 4.0))
         data = raw.recv(256)
         if data:
             banner = data.decode("utf-8", errors="replace").strip()[:160] or None
+        else:
+            # clean EOF: accepted, then closed with zero bytes pushed
+            closed_after_accept = True
     except (TimeoutError, OSError):
         banner = None  # open but silent: the service never pushed a greeting
-    return raw, None, banner
+    return raw, None, banner, closed_after_accept
 
 
 class SafePortProbeClient:
@@ -81,8 +90,10 @@ class SafePortProbeClient:
         sock = None
         peer = None
         banner = None
+        closed_after_accept = False
         try:
-            sock, peer, banner = await asyncio.to_thread(self._connect, host, int(port), self._timeout)
+            sock, peer, banner, closed_after_accept = await asyncio.to_thread(
+                self._connect, host, int(port), self._timeout)
         except TimeoutError:
             return self._outcome(host, port, "timeout", started)
         except ConnectionRefusedError:
@@ -102,12 +113,15 @@ class SafePortProbeClient:
                     pass
         # A TLS peer cert or a banner proves an application answered; a bare
         # accept with neither is the silent-service shape (8601), so it gets
-        # its own status instead of blending into "open".
+        # its own status instead of blending into "open". Within that status,
+        # error_type separates a clean zero-byte EOF (tarpit/hardening: the
+        # R3官网 3306 shape) from a silent hold (8601 shape).
         status = "open" if (peer is not None or banner is not None) else "open_no_banner"
         return self._outcome(
             host, port, status, started,
             tls_sha256=hashlib.sha256(peer).hexdigest() if peer else None,
             banner=banner,
+            error_type="closed_after_accept" if closed_after_accept else None,
         )
 
     @staticmethod

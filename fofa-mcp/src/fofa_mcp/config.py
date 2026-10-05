@@ -110,7 +110,7 @@ class Settings:
             max_page_size=_int_env("FOFA_MAX_PAGE_SIZE", 200, 1, 10000),
             max_cursor_pages=_int_env("FOFA_MAX_CURSOR_PAGES", 20, 1, 1000),
             max_requests_per_session=_int_env(
-                "FOFA_MAX_REQUESTS_PER_SESSION", 20, 1, 10000
+                "FOFA_MAX_REQUESTS_PER_SESSION", 100, 1, 10000
             ),
             max_estimated_fpoints=_int_env(
                 "FOFA_MAX_ESTIMATED_FPOINTS", 30, 1, 100000

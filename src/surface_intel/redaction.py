@@ -9,6 +9,17 @@ _SENSITIVE = re.compile(
     re.IGNORECASE,
 )
 
+# R3 lesson: redact()'s string branch used the raw _SENSITIVE vocabulary, so
+# a MySQL handshake banner got nuked wholesale because the wire protocol
+# names its auth plugin "mysql_native_password". Value-level redaction only
+# fires on credential-assignment shapes ("password=hunter2", JSON
+# '"token": "..."', "authorization: Bearer ...", "?token=" query strings);
+# protocol vocabulary without an assignment separator stays readable.
+_VALUE_CREDENTIAL = re.compile(
+    r"[\"']?(authorization|set-cookie|cookie|password|passwd|secret|token|api[_-]?key|private[_-]?key)[\"']?\s*[:=]",
+    re.IGNORECASE,
+)
+
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
@@ -22,7 +33,7 @@ def redact(value: Any) -> Any:
         return [redact(item) for item in value]
     if isinstance(value, tuple):
         return tuple(redact(item) for item in value)
-    if isinstance(value, str) and _SENSITIVE.search(value):
+    if isinstance(value, str) and _VALUE_CREDENTIAL.search(value):
         return "[REDACTED]"
     return value
 

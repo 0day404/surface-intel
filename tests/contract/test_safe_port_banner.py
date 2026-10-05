@@ -13,29 +13,42 @@ class _FakeSock:
 @pytest.mark.asyncio
 async def test_plain_port_banner_is_recorded():
     def connect(host, port, timeout):
-        return _FakeSock(), None, "8.0.36 MySQL"
+        return _FakeSock(), None, "8.0.36 MySQL", False
 
     outcome = await SafePortProbeClient(connect=connect).probe("db.example.com", 3306)
     assert outcome["status"] == "open"
     assert outcome["banner"] == "8.0.36 MySQL"
     assert outcome["service_hint"] == "mysql"
     assert outcome["tls_sha256"] is None
+    assert outcome["error_type"] is None
 
 
 @pytest.mark.asyncio
 async def test_open_but_silent_port_is_open_no_banner():
     def connect(host, port, timeout):
-        return _FakeSock(), None, None  # recv timed out: no greeting came
+        return _FakeSock(), None, None, False  # recv timed out: no greeting came
 
     outcome = await SafePortProbeClient(connect=connect).probe("www.example.com", 8601)
     assert outcome["status"] == "open_no_banner"  # the 8601 shape
     assert outcome["banner"] is None
+    assert outcome["error_type"] is None  # silent hold, not an EOF
+
+
+@pytest.mark.asyncio
+async def test_clean_eof_after_accept_is_closed_after_accept():
+    def connect(host, port, timeout):
+        # the R3 官网 3306 shape: accepted, then zero bytes and a FIN
+        return _FakeSock(), None, None, True
+
+    outcome = await SafePortProbeClient(connect=connect).probe("www.example.com", 3306)
+    assert outcome["status"] == "open_no_banner"
+    assert outcome["error_type"] == "closed_after_accept"
 
 
 @pytest.mark.asyncio
 async def test_tls_port_with_cert_stays_open_not_no_banner():
     def connect(host, port, timeout):
-        return _FakeSock(), b"der-cert", None  # TLS path never reads a banner
+        return _FakeSock(), b"der-cert", None, False  # TLS path never reads a banner
 
     outcome = await SafePortProbeClient(connect=connect).probe("www.example.com", 443)
     assert outcome["status"] == "open"

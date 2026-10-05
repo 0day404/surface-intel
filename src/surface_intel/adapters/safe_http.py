@@ -78,8 +78,12 @@ class SafeHttpAdapter:
         }
         # error travels with its error_type: a bare "timeout"/"tls_error"
         # string hid exactly the distinction (timeout_connect vs app_layer,
-        # cert_verify vs handshake) the 8601 triage needed.
+        # cert_verify vs handshake) the 8601 triage needed. A client hint
+        # (plain_http_may_be_available on tls_error) rides along in the same
+        # error string so batch --targets output shows the follow-up move.
         error_detail = observation.get("error_type") or "unknown"
+        if observation.get("hint"):
+            error_detail = f"{error_detail};{observation['hint']}"
         if transport_status == "timeout":
             return AdapterResult("timed_out", observations=[observation],
                                  error=f"timeout:{error_detail}")

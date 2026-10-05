@@ -20,6 +20,18 @@ def test_budget_rejects_request_limit():
         budget.reserve_request()
 
 
+def test_budget_exhaustion_names_the_pool_and_the_escape_hatch():
+    # R3 lesson: a caller that meant its own pool but fell into "default"
+    # needs the pool name and the reset move in the error itself
+    budget = Budget(1, 3, 100, task_id="ceramtec-r3")
+    budget.reserve_request()
+    with pytest.raises(PolicyDeniedError, match="task 'ceramtec-r3'"):
+        budget.reserve_request()
+    registry = BudgetRegistry(max_requests=0, max_estimated_fpoints=5, max_total_results=100)
+    with pytest.raises(PolicyDeniedError, match="different task_id"):
+        registry.get("default").reserve_request()
+
+
 def test_budget_registry_isolates_tasks():
     registry = BudgetRegistry(
         max_requests=2,

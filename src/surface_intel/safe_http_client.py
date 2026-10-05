@@ -151,9 +151,12 @@ class SafeHttpFetchClient:
             except ssl.SSLError as exc:
                 kind = "cert_verify" if isinstance(exc, ssl.SSLCertVerificationError) else "handshake"
                 # record the concrete handshake failure so remote triage can
-                # tell a certificate mismatch from a protocol/version problem
+                # tell a certificate mismatch from a protocol/version problem;
+                # the hint flags that the same host often answers on plain
+                # http:// (R3: pre/dev/biolox were 401-reachable on :80 only)
                 return {"status": "tls_error", "error_type": type(exc).__name__,
                         "tls_failure_kind": kind, "error": str(exc)[:200],
+                        "hint": "plain_http_may_be_available",
                         "redirect_chain": chain, "queried_at": _now()}
             except (ConnectionError, OSError) as exc:
                 return {"status": "http_error", "error_type": type(exc).__name__,

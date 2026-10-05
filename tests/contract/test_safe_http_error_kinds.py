@@ -34,14 +34,17 @@ async def test_bare_timeout_from_injected_hops_is_connect_by_conservative_defaul
 
 
 @pytest.mark.asyncio
-async def test_tls_error_records_failure_kind():
+async def test_tls_error_records_failure_kind_and_plain_http_hint():
     cert = await SafeHttpFetchClient(
         fetch_hop=_fail(ssl.SSLCertVerificationError("certificate verify failed"))).observe(
         "https://www.example.com/", allowed_hosts=("example.com",))
     assert cert["status"] == "tls_error"
     assert cert["tls_failure_kind"] == "cert_verify"
+    # R3 lesson: TLS-refusing hosts often answer on plain http - say so
+    assert cert["hint"] == "plain_http_may_be_available"
 
     handshake = await SafeHttpFetchClient(fetch_hop=_fail(ssl.SSLError("no shared cipher"))).observe(
         "https://www.example.com/", allowed_hosts=("example.com",))
     assert handshake["status"] == "tls_error"
     assert handshake["tls_failure_kind"] == "handshake"
+    assert handshake["hint"] == "plain_http_may_be_available"

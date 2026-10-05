@@ -33,3 +33,15 @@ def test_empty_scope_is_rejected(tmp_path):
 def test_sensitive_values_are_redacted():
     result = redact({"Authorization": "Bearer secret", "nested": {"token": "abc"}, "ok": "value"})
     assert result == {"Authorization": "[REDACTED]", "nested": {"token": "[REDACTED]"}, "ok": "value"}
+
+
+def test_value_redaction_needs_credential_assignment_shape():
+    # credential shapes still redact: header style, k=v, URL query, JSON
+    assert redact("password=hunter2") == "[REDACTED]"
+    assert redact("https://x/?token=abc") == "[REDACTED]"
+    assert redact('"api_key": "sk-123"') == "[REDACTED]"
+    # R3 lesson: protocol vocabulary without an assignment separator must
+    # NOT nuke a service banner (mysql_native_password is an auth plugin name)
+    mysql_greeting = "8.0.36\x00mysql_native_password\x00"
+    assert redact(mysql_greeting) == mysql_greeting
+    assert redact("SSH-2.0-OpenSSH_9.6") == "SSH-2.0-OpenSSH_9.6"
