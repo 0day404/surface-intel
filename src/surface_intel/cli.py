@@ -1147,47 +1147,17 @@ def cmd_report(args: argparse.Namespace) -> int:
     try:
         # C1: per-task subdirectory - no cross-task overwrite
         report = build_report(db, args.task_id, report_output_dir(_config(args).task_root, args.task_id),
-                              reveal_emails=getattr(args, "reveal_emails", False))
+                              reveal_emails=getattr(args, "reveal_emails", False),
+                              include_xlsx=getattr(args, "xlsx", False))
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
         return 2
-    delivered = None
-    if getattr(args, "deliver", False):
-        delivered = _deliver_report(
-            report, task_root=Path(_config(args).task_root), task_id=args.task_id,
-            round_label=args.round, title=args.title)
     print(json.dumps({"ok": True, "integrity_status": report["integrity_status"],
-                      "summary": report["summary"], "export": report["export"],
-                      "delivered": delivered}, ensure_ascii=True))
+                      "summary": report["summary"], "export": report["export"]},
+                     ensure_ascii=True))
     return 0
 
 
-def _deliver_report(report: dict, *, task_root: Path, task_id: str,
-                    round_label: str | None, title: str | None) -> dict:
-    """D-2 (rev 2026-10-05): copy the tool workbook to <task-root>/../reports/
-    as {round}_{date}_{title}.xlsx - a placeholder at the tool-export format.
-    The delivered xlsx has a FIXED format: the 5-sheet workbook from
-    scripts/build_deliverable_xlsx.py (project data variant) overwrites this
-    placeholder under the same name as the final delivery step. The analyst
-    export is no longer copied into the delivery directory (dropped per
-    operator decision - analyst.xlsx format is not a deliverable). The
-    narrative md stays agent-authored and is written straight into the same
-    directory."""
-    import shutil
-    from datetime import datetime
-
-    export = report.get("export") or {}
-    date = datetime.now().strftime("%Y-%m-%d")
-    stem = f"{round_label or 'deliver'}_{date}_{title or task_id[:8]}"
-    deliver_dir = task_root.parent / "reports"
-    deliver_dir.mkdir(parents=True, exist_ok=True)
-    copied: dict[str, str] = {}
-    if export.get("xlsx_status") == "exported" and export.get("xlsx"):
-        src = Path(export["xlsx"])
-        if src.exists():
-            shutil.copy2(src, deliver_dir / f"{stem}.xlsx")
-            copied[f"{stem}.xlsx"] = str(deliver_dir / f"{stem}.xlsx")
-    return {"dir": str(deliver_dir), "files": copied}
 
 
 def cmd_checkpoint(args: argparse.Namespace) -> int:
@@ -1331,10 +1301,10 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--merge", nargs="+", dest="merge_tasks")
             # C3: explicit opt-in - restore redaction_map plaintexts into deliverables
             command.add_argument("--reveal-emails", action="store_true")
-            # D-2: double-write deliverables to <task-root>/../reports/
-            command.add_argument("--deliver", action="store_true")
-            command.add_argument("--round", default=None)
-            command.add_argument("--title", default=None)
+            # 2026-10-05: opt-in xlsx intermediates (result.xlsx/analyst_report.xlsx)
+            # for humans inspecting a draft; the default report is json-only and
+            # the final delivered workbook comes from build_deliverable_xlsx.py
+            command.add_argument("--xlsx", action="store_true")
         if name in {"status", "validate", "preflight", "plan", "run", "checkpoint", "recover", "pause", "resume", "cancel", "merge", "baseline-save", "baseline-diff", "diff-report", "scope-amend"}:
             command.add_argument("task_id")
         if name == "checkpoint":

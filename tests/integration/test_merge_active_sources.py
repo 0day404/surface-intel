@@ -207,7 +207,7 @@ def test_analyst_site_and_service_sheets_reflect_active_sources(tmp_path):
         "tls_sha256": "aa" * 32,
     })
     merge_task_observations(db, "t", scope)
-    build_report(db, "t", tmp_path / "reports")
+    build_report(db, "t", tmp_path / "reports", include_xlsx=True)
     workbook = load_workbook(tmp_path / "reports" / "analyst_report.xlsx")
     sites = [row for row in workbook["站点"].iter_rows(values_only=True)][1:]
     assert ["https://www.example.com/", "HTTP 200", "safe_http 主动观察"] in [list(row) for row in sites]

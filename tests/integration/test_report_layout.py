@@ -24,7 +24,7 @@ def _seed_task(tmp_path, task_id):
 
 def test_report_writes_per_task_subdirectory(tmp_path):
     _seed_task(tmp_path, "t")
-    code = main(["report", "t", "--task-root", str(tmp_path)])
+    code = main(["report", "t", "--task-root", str(tmp_path), "--xlsx"])
     assert code == 0
     for name in ("result.json", "result.xlsx", "analyst_report.xlsx"):
         assert (tmp_path / "reports" / "t" / name).exists(), name

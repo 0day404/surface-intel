@@ -70,7 +70,7 @@ uv run --directory [SKILL_DIR] surface-intel
 ```
 
 - **骨架一键拉起**:`uv run --directory [SKILL_DIR] surface-intel init [WORK_ROOT]/projects/<项目>/task --scaffold`——建 task/ 的同时在上级创建 `inputs/ reports/ data/` + NOTES.md 模板(幂等,已有不覆盖)。
-- **三条流向规则**:①工具产出永落 `task/reports/<task-id>/`;②交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 生成,项目数据版随项目放 `data/`)——`report --deliver` 只复制一份工具导出格式的占位 xlsx 到 `projects/<p>/reports/`,最终交付前被同名的 5-sheet 工作簿覆盖;`_analyst.xlsx` 不入交付目录(2026-10-05 操作方裁定,格式非交付件);③`[SKILL_DIR]/scripts/` 通用脚本路径全参数化(`--result-json/--out` 等),数据列按项目在脚本内定制。
+- **三条流向规则**:①工具产出永落 `task/reports/<task-id>/`;②`report` 默认 **json-only**——唯一中间产物是 `result.json`(AI/程序消费的权威格式,5-sheet 生成器的数据源);xlsx 渲染(result.xlsx/analyst_report.xlsx)仅为人工查底稿的 opt-in(`--xlsx`),不作为任何交付件(2026-10-05 操作方裁定);③交付 xlsx **格式固定为 5-sheet 工作簿**,由 `build_deliverable_xlsx.py` 从 result.json 生成直接落 `projects/<p>/reports/`(项目数据版随项目放 `data/`);④`[SKILL_DIR]/scripts/` 通用脚本路径全参数化(`--result-json/--out` 等),数据列按项目在脚本内定制。
 
 ## 工作流总览
 
@@ -262,9 +262,10 @@ diff 工具轮新揭示 vs FOFA 已知集,任何一项命中就回 Phase 1 做�
 ```bash
 # 单任务报告(工具产出永落 task/reports/<task-id>/)
 uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task [--reveal-emails]
-# 占位复制:--deliver 把工具导出 xlsx 复制到 projects/<项目>/reports/ 作占位,命名 {轮次}_{日期}_{主题}.xlsx(轮次/主题由操作方传,工具不猜语义)
-uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --deliver --round R2 --title 中国区资产核查
-# 最终交付 xlsx(固定 5-sheet 格式,同名覆盖上面的占位件;数据段=项目定制版,放 projects/<项目>/data/):
+# 报告(默认 json-only:唯一中间产物 result.json,落 task/reports/<task-id>/;--reveal-emails 见 C3)
+uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task
+# 人工查底稿才用(opt-in xlsx 中间产物,非交付件):report <task-id> ... --xlsx
+# 最终交付 xlsx(固定 5-sheet 格式,从 result.json 生成,直接落交付目录;数据段=项目定制版,放 projects/<项目>/data/):
 uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py \
         --result-json [WORK_ROOT]/projects/<项目>/task/reports/<task-id>/result.json \
         --out [WORK_ROOT]/projects/<项目>/reports/{轮次}_{日期}_{主题}.xlsx
@@ -274,21 +275,21 @@ uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-
 
 **最终交付物固定两件**（xlsx 格式固定,自 2026-10-05 起任何轮次不再变体）：
 
-1. **xlsx 结构化工作簿**（**固定 5-sheet 格式**——上一步 `build_deliverable_xlsx.py` 产物,同名覆盖 `--deliver` 占位件;工具导出格式的 xlsx 与 `_analyst.xlsx` 均不是交付件）——5 张 sheet、多做列少做 sheet，固定顺序与分工：
+1. **xlsx 结构化工作簿**（**固定 5-sheet 格式**——`build_deliverable_xlsx.py` 产物;工具侧不产任何交付 xlsx,`result.xlsx`/`analyst_report.xlsx` 仅 `--xlsx` opt-in 的人工底稿）——5 张 sheet、多做列少做 sheet，固定顺序与分工：
 
    | #   | Sheet            | 要点                                                                                                                                                                                                                                                   |
    | --- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
    | 1   | 报告摘要         | 任务/口径/统计 + 覆盖说明、已修正判断、缺口（并入本表下半区）                                                                                                                                                                                          |
    | 2   | 域名资产         | 区域做列；归属判定（自有/关联第三方/待确认）+ 关系类型 + 依据 + 来源                                                                                                                                                                                   |
    | 3   | IP·网段·基础设施 | 多租户判定（独占/共享/第三方）、托管商、承载站点、关系洞察列                                                                                                                                                                                           |
-   | 4   | 风险点           | 紧跟资产表：优先级(P1-P4)/资产/发现/CVE 线索/依据/建议/状态                                                                                                                                                                                            |
+   | 4   | 风险点           | 紧跟资产表：优先级(P1-P4)/资产/发现/CVE 线索/依据/状态（**无"建议"列**,2026-10-05 裁定——处置动作写 md 叙事）                                                                                                                                                 |
    | 5   | 站点与服务       | 按宿主 IP 分组；"类型"列区分官网/BPM/VPN/云盘等，"管理面"列(是/否)吸收登录入口专项；**"HTTP 状态"与"返回头摘要"两列**体现返回包（server/content-type/x-powered-by/via/location/安全头缺失标注）；完整原始返回包(curl -sS -i)进 md 附录，仅收高价值目标 |
 
    美观规范：表头深色填充白字、冻结首行、自动筛选、风险优先级条件着色（P1 红/P2 橙/P3 黄/P4 灰）、归属判定着色（自有绿/关联橙/第三方灰）、sheet tab 分区着色。生成方式：`uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py --result-json <项目>/task/reports/<task-id>/result.json --out <项目>/reports/<轮次>_<日期>_<主题>.xlsx`(脚本随 skill 走,路径全参数化;内含 CeramTec R2 实战样例,发现集/风险/归属数据列按项目在脚本内替换),数据源 = `report --merge` 产物 + observation/evidence + 代理分析列（风险表/归属判定/关系洞察由代理以结构化数据提供）。
 
 2. **md 叙事报告**——形态对齐项目内既有范例(如 ceramtec 项目 `R1_2026-10-04_全球面FOFA.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。md 直写 `projects/<项目>/reports/`(与 xlsx 同名配对)。
 
-工具 analyst_report.xlsx 是数据底稿(留 `task/reports/<task-id>/` 供 5-sheet 生成器取数,不复制进交付目录);email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
+result.json 是唯一数据底稿(留 `task/reports/<task-id>/`,5-sheet 生成器与 AI 分析都从它取数);email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
 
 ## scope.json 模板(全通配,收集优先)
 
@@ -347,6 +348,6 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 
 2026-10-05 **C+ 修复批落地**(`7af95e0`+`bc9463b`,448+76 tests 双绿):P01 recon 泄漏根治(close 有序关停+3.14 StreamReader/_transport 坑)、P02 引号 fail-fast、P03 错误分类阶段化(timeout_connect/timeout_app_layer、tls_failure_kind)、P04 result.json payload 对象展开(保留 payload_json 字符串)、P05 fofa-mcp fields 全量(cert/status_code)、P16 headers 全量落库(白名单删除)、D-1 init --scaffold、D-2 report --deliver/--round/--title 双写、D-3 port-check banner+open_no_banner。通用脚本迁入 `scripts/`(xlsx 交付路径参数化、t0 banner 兜底);目录规范改多项目 `projects/<p>/` 结构;junction 单源化(`~/.claude/skills/surface-intel` → 本仓);授权节改写为锚定使用方对具体目标持有的授权书(P07/P08,用户 2026-10-05 批复措辞)。
 
-2026-10-05 **D-2 修订(操作方裁定,R3 复测轮触发)**:交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 项目数据版);`report --deliver` 改单写——只复制工具导出 xlsx 作同名占位件,`_analyst.xlsx` 不再复制进交付目录(analyst 格式非交付件;底稿仍留 `task/reports/<task-id>/` 供取数)。最终交付前 5-sheet 工作簿同名覆盖占位件,交付目录只留 `R{n}_{日期}_{主题}.xlsx + .md` 两件。
+2026-10-05 **D-2 修订(操作方裁定,R3 复测轮触发,两步落地)**:①交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 项目数据版),风险点 sheet **不设"建议"列**(7 列:编号/优先级/资产/发现/CVE 线索/依据/状态,处置动作走 md 叙事);②`report` 默认 **json-only**——唯一中间产物 `result.json`,`result.xlsx`/`analyst_report.xlsx` 降为 `--xlsx`/`include_xlsx` opt-in 的人工底稿,**`--deliver`/`--round`/`--title` 与占位复制机制删除**(最终交付 xlsx 由 5-sheet 生成器直接 `--out` 交付目录;`report --merge` 合并工作簿暂保持现状)。交付目录固定两件:`R{n}_{日期}_{主题}.xlsx + .md`。
 
 **待办 backlog**:`[WORK_ROOT]/docs/surface-intel-backlog.md`(工作流扩展/交付脚本)——每次任务开始前先过一遍,完成即勾选。

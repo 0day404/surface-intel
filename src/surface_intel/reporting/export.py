@@ -49,7 +49,8 @@ def compute_integrity_status(
 
 
 def build_report(db: Database, task_id: str, output_dir: str | Path,
-                 *, reveal_emails: bool = False) -> dict:
+                 *, reveal_emails: bool = False,
+                 include_xlsx: bool = False) -> dict:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     task = next(db.rows("SELECT * FROM task WHERE task_id=?", (task_id,)), None)
@@ -272,18 +273,25 @@ def build_report(db: Database, task_id: str, output_dir: str | Path,
         _reveal_emails(db, task_id, report)
     json_path = output / "result.json"
     json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
-    report["export"] = _export_xlsx(output, report, task_id, assets, scope_rows,
-                                   asset_relations, asset_conflicts, browser_pages,
-                                   browser_network, review_queue, checkpoints)
-    # analyst-facing delivery in the company template; failure isolated from
-    # the machine report exactly like the XLSX path (case-08 semantics)
-    from .analyst_report import build_analyst_report
+    # 2026-10-05 (operator decision): result.json is THE machine-readable
+    # intermediate - the xlsx renderings (result.xlsx / analyst_report.xlsx)
+    # are opt-in via include_xlsx for humans inspecting a draft. The final
+    # delivered workbook is built from this JSON by
+    # scripts/build_deliverable_xlsx.py, so the default report leaves no xlsx
+    # intermediates behind.
+    if include_xlsx:
+        report["export"] = _export_xlsx(output, report, task_id, assets, scope_rows,
+                                       asset_relations, asset_conflicts, browser_pages,
+                                       browser_network, review_queue, checkpoints)
+        # analyst-facing delivery in the company template; failure isolated from
+        # the machine report exactly like the XLSX path (case-08 semantics)
+        from .analyst_report import build_analyst_report
 
-    analyst_meta = build_analyst_report(db, task_id, report, output)
-    report["export"]["analyst_report"] = analyst_meta
-    # export metadata is appended to the JSON after the XLSX attempt; case-08:
-    # a failing XLSX never invalidates the already-written JSON main result
-    json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
+        analyst_meta = build_analyst_report(db, task_id, report, output)
+        report["export"]["analyst_report"] = analyst_meta
+        # export metadata is appended to the JSON after the XLSX attempt; case-08:
+        # a failing XLSX never invalidates the already-written JSON main result
+        json_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
     return report
 
 

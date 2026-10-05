@@ -50,7 +50,7 @@ def test_report_includes_merge_assets_relations_and_conflicts(tmp_path):
     merge_task_observations(db, "t", scope)
 
     output_dir = tmp_path / "report"
-    report = build_report(db, "t", output_dir)
+    report = build_report(db, "t", output_dir, include_xlsx=True)
 
     # JSON: dedicated merge sections + summary
     assert report["asset_relations"] and report["asset_conflicts"]

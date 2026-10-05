@@ -22,7 +22,8 @@ def test_offline_flow_persists_observations_and_rebuilds_reports(tmp_path, capsy
         {"observations": [{"host": "edge.example.com"}], "has_more": False}
     ]))
     assert result["assets"] == 1
-    report = build_report(Database(tmp_path / "task.sqlite"), task_id, tmp_path / "reports")
+    report = build_report(Database(tmp_path / "task.sqlite"), task_id, tmp_path / "reports",
+                          include_xlsx=True)
     assert report["integrity_status"] == "partial"
     assert len(report["assets"]) == 1
     assert load_workbook(tmp_path / "reports" / "result.xlsx").sheetnames[:2] == ["报告摘要", "资产总表"]

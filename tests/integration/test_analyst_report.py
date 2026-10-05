@@ -55,7 +55,7 @@ def _seed(tmp_path):
 
 def test_analyst_report_follows_company_template(tmp_path):
     db = _seed(tmp_path)
-    report = build_report(db, "t", tmp_path / "reports")
+    report = build_report(db, "t", tmp_path / "reports", include_xlsx=True)
     meta = report["export"]["analyst_report"]
     assert meta["status"] == "exported"
 
@@ -93,7 +93,7 @@ def test_analyst_report_follows_company_template(tmp_path):
 
 def test_machine_report_stays_the_primary_artifact(tmp_path):
     db = _seed(tmp_path)
-    report = build_report(db, "t", tmp_path / "reports")
+    report = build_report(db, "t", tmp_path / "reports", include_xlsx=True)
     assert report["export"]["xlsx_status"] == "exported"
     assert (tmp_path / "reports" / "result.json").exists()
     assert (tmp_path / "reports" / "result.xlsx").exists()

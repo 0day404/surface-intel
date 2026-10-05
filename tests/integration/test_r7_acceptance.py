@@ -126,14 +126,14 @@ def test_case08_xlsx_failure_keeps_json_main_result(tmp_path):
         raise OSError("disk full")
 
     with patch.object(RealWorkbook, "save", exploding_save):
-        report = build_report(db, "t", output_dir)
+        report = build_report(db, "t", output_dir, include_xlsx=True)
 
     # case-08: the JSON main result is intact and the failure is explicit
     assert (output_dir / "result.json").exists()
     assert report["export"]["xlsx_status"] == "failed"
     assert "disk full" in report["export"]["xlsx_error"]
     # a retry after the failure recovers the XLSX
-    report = build_report(db, "t", output_dir)
+    report = build_report(db, "t", output_dir, include_xlsx=True)
     assert report["export"]["xlsx_status"] == "exported"
     assert report["export"]["asset_count_consistent"] is True
 
@@ -156,7 +156,7 @@ def test_cli_full_chain_init_to_report_on_clean_dir(tmp_path, capsys):
     main(["status", "--task-root", str(tmp_path), task_id])
     status_output = json.loads(capsys.readouterr().out)
     assert status_output["ok"] is True
-    main(["report", "--task-root", str(tmp_path), task_id])
+    main(["report", "--task-root", str(tmp_path), task_id, "--xlsx"])
     report = json.loads(capsys.readouterr().out)
     assert report["export"]["xlsx_status"] == "exported"
     # the default offline fixture produces no FOFA rows - the chain mechanics

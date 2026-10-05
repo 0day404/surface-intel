@@ -175,30 +175,30 @@ def sheet_ips(wb):
     style_sheet(ws, widths=[18, 12, 26, 30, 52, 40], tab_color=TAB["IP"])
 
 
-# ---- Sheet 4: 风险点 ----
+# ---- Sheet 4: 风险点(2026-10-05 操作方裁定: 不设"建议"列, 处置动作走 md 叙事) ----
 RISKS = [
-    # 编号, 优先级, 资产, 发现, CVE线索, 依据, 建议, 状态
-    ("R1", "P1", "116.255.206.92(官网服务器)", "数据库端口组公网暴露: MySQL(3306)+MSSQL(1433)+Oracle(1521), 外加 RDP(33890)+SSH(10022); Windows Server 2012 已 EOL", "Windows Server 2012 R2 后 EOL 积累补丁缺口(组件清单无专项条目); 数据库口令爆破面", "FOFA host 画像(快照 2026-09-27); 端口未主动复核(授权边界)", "立即核查防火墙策略, 数据库/远程管理端口收敛至内网或 VPN; 升级 OS; 轮转数据库口令", "待处置(端口状态为快照)"),
-    ("R2", "P1", "bpm.ceramtec.com.cn:8899(泛微 e-cology)", "OA 系统公网明文 HTTP 暴露; 含 Log4j2 组件; 页面资源停留 2021-05(长期未更新); 缺 HSTS/CSP", "Log4j2→CVE-2021-44228 线索(版本未核); 泛微 BshServlet 反序列化(组件清单条目); e-office SQLi 族(清单待补号)", "工具轮响应包: cookie ecology_JSessionid+server WVS; playwright 落点 /wui/index.html; FOFA 产品指纹", "核查泛微版本与 Log4j 版本; /weaver/bsh.servlet.BshServlet 等历史路径自查; 升级+HTTPS+接入 WAF/限源", "待处置"),
-    ("R3", "P2", "47.98.232.209(阿里云·biolox)", "MySQL(3306)+SSH(22) 公网开放, 承载 biolox 源站", "MySQL 弱口令/未授权面(版本未核)", "FOFA host 画像(快照 2026-09-26); 未主动复核", "安全组收敛 3306/22 至白名单; 与 R1 同步轮转口令", "待处置(端口状态为快照)"),
-    ("R4", "P2", "biolox.ceramtec.com.cn", "ICP 备案失效(403 Beaver 拦截页), 源站仍存活且端口暴露", "合规风险(境内未备案对外提供服务的通报/关停风险)", "工具轮实测 403+FOFA 截图面", "重新备案或下线; 处置期间同步收敛源站端口", "待处置"),
-    ("R5", "P2", "dev/pre.ceramtec.com.cn", "测试环境公网可达(德国托管), 仅 Basic Auth 单层防护, TLS 握手异常拒绝", "无专项 CVE; 测试环境常见旧依赖+弱凭据", "工具轮 SSLEOFError + 前轮 401 记录", "测试环境限源(公司出口/VPN); 若弃用即下线", "待处置"),
-    ("R6", "P3", "tracking.ceramtec-group.cn(Matomo)", "统计后台公网可达", "无专项; 弱口令→流量/访客数据泄露", "工具轮: 安全头完善(CSP/HSTS/SameSite) — 配置良好降低风险", "限源或 VPN 化; 强制 MFA", "待处置(低)"),
-    ("R7", "P3", "58.210.136.131:8601(二维码系统)", "状态变化: FOFA 历史可见(ASP.NET+OWNVIEW) → 本次实测 http/https 均 timeout", "无专项; 若为白名单仅对公网关闭, 内部暴露面仍在", "工具轮 http-observe timeout + curl 15s 超时复核", "确认服务现状: 若已下线同步注销解析; 若白名单化保持并审计白名单", "已变化(观察中)"),
-    ("R8", "P3", "49.13.251.12(avenit 代理商)", "中国站生产数据副本(cn-group/cn-medical)存于代理商服务器", "供应链面(代理商失陷→中国站源码/数据)", "前轮全球面报告(2026-10-04)", "合同与数据面管控; 要求代理商隔离生产副本", "待处置(供应链)"),
-    ("R9", "P3", "116.255.206.92(TYPO3 CMS)", "官网 CMS 为 TYPO3+PHP, 具体版本未核", "TYPO3 历史 CVE 族(版本核验前置)", "FOFA 产品指纹 TYPO3-CMS", " CMS 版本核查并纳入补丁管理", "待核验"),
-    ("R10", "P4", "ceramtec.com.cn/ceramtec-group.com.cn/ceramtec.cn(裸域)", "裸域直连 https 证书报错(证书仅覆盖 www), 301/451 明文跳转", "无专项; 用户体验/降级面", "工具轮 SSLCertVerificationError 复现", "证书补 SAN 或关闭裸域直连", "低优先"),
+    # 编号, 优先级, 资产, 发现, CVE线索, 依据, 状态
+    ("R1", "P1", "116.255.206.92(官网服务器)", "数据库端口组公网暴露: MySQL(3306)+MSSQL(1433)+Oracle(1521), 外加 RDP(33890)+SSH(10022); Windows Server 2012 已 EOL", "Windows Server 2012 R2 后 EOL 积累补丁缺口(组件清单无专项条目); 数据库口令爆破面", "FOFA host 画像(快照 2026-09-27); 端口未主动复核(授权边界)", "待处置(端口状态为快照)"),
+    ("R2", "P1", "bpm.ceramtec.com.cn:8899(泛微 e-cology)", "OA 系统公网明文 HTTP 暴露; 含 Log4j2 组件; 页面资源停留 2021-05(长期未更新); 缺 HSTS/CSP", "Log4j2→CVE-2021-44228 线索(版本未核); 泛微 BshServlet 反序列化(组件清单条目); e-office SQLi 族(清单待补号)", "工具轮响应包: cookie ecology_JSessionid+server WVS; playwright 落点 /wui/index.html; FOFA 产品指纹", "待处置"),
+    ("R3", "P2", "47.98.232.209(阿里云·biolox)", "MySQL(3306)+SSH(22) 公网开放, 承载 biolox 源站", "MySQL 弱口令/未授权面(版本未核)", "FOFA host 画像(快照 2026-09-26); 未主动复核", "待处置(端口状态为快照)"),
+    ("R4", "P2", "biolox.ceramtec.com.cn", "ICP 备案失效(403 Beaver 拦截页), 源站仍存活且端口暴露", "合规风险(境内未备案对外提供服务的通报/关停风险)", "工具轮实测 403+FOFA 截图面", "待处置"),
+    ("R5", "P2", "dev/pre.ceramtec.com.cn", "测试环境公网可达(德国托管), 仅 Basic Auth 单层防护, TLS 握手异常拒绝", "无专项 CVE; 测试环境常见旧依赖+弱凭据", "工具轮 SSLEOFError + 前轮 401 记录", "待处置"),
+    ("R6", "P3", "tracking.ceramtec-group.cn(Matomo)", "统计后台公网可达", "无专项; 弱口令→流量/访客数据泄露", "工具轮: 安全头完善(CSP/HSTS/SameSite) — 配置良好降低风险", "待处置(低)"),
+    ("R7", "P3", "58.210.136.131:8601(二维码系统)", "状态变化: FOFA 历史可见(ASP.NET+OWNVIEW) → 本次实测 http/https 均 timeout", "无专项; 若为白名单仅对公网关闭, 内部暴露面仍在", "工具轮 http-observe timeout + curl 15s 超时复核", "已变化(观察中)"),
+    ("R8", "P3", "49.13.251.12(avenit 代理商)", "中国站生产数据副本(cn-group/cn-medical)存于代理商服务器", "供应链面(代理商失陷→中国站源码/数据)", "前轮全球面报告(2026-10-04)", "待处置(供应链)"),
+    ("R9", "P3", "116.255.206.92(TYPO3 CMS)", "官网 CMS 为 TYPO3+PHP, 具体版本未核", "TYPO3 历史 CVE 族(版本核验前置)", "FOFA 产品指纹 TYPO3-CMS", "待核验"),
+    ("R10", "P4", "ceramtec.com.cn/ceramtec-group.com.cn/ceramtec.cn(裸域)", "裸域直连 https 证书报错(证书仅覆盖 www), 301/451 明文跳转", "无专项; 用户体验/降级面", "工具轮 SSLCertVerificationError 复现", "低优先"),
 ]
 
 def sheet_risks(wb):
     ws = wb.create_sheet("风险点")
-    ws.append(["编号", "优先级", "资产", "发现", "CVE 线索(对组件清单核出)", "依据", "建议", "状态"])
+    ws.append(["编号", "优先级", "资产", "发现", "CVE 线索(对组件清单核出)", "依据", "状态"])
     for row in RISKS:
         ws.append(row)
     for r in range(2, ws.max_row + 1):
         fill_cell(ws.cell(r, 2), ws.cell(r, 2).value, RISK_FILL)
         ws.cell(r, 1).font = Font(bold=True)
-    style_sheet(ws, widths=[8, 9, 30, 48, 40, 34, 40, 16], tab_color=TAB["风险"])
+    style_sheet(ws, widths=[8, 9, 30, 48, 40, 34, 16], tab_color=TAB["风险"])
 
 
 # ---- Sheet 5: 站点与服务 ----
