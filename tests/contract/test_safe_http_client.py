@@ -146,5 +146,9 @@ async def test_invalid_url_and_method_are_structural_refusals():
 @pytest.mark.asyncio
 async def test_wildcard_scope_hosts_authorize_subdomains():
     client = SafeHttpFetchClient(fetch_hop=_hop())
+    # bare "*" alone must authorize (full-wildcard scope template); regression:
+    # it used to be stripped to "" and skipped, silently blocking every host
+    outcome = await client.observe("https://www.example.com/", allowed_hosts=("*",))
+    assert outcome["status"] == "observed"
     outcome = await client.observe("https://www.example.com/", allowed_hosts=("*", "example.com"))
     assert outcome["status"] == "observed"

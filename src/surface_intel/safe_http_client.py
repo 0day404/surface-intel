@@ -51,6 +51,7 @@ def _default_fetch_hop(url: str, method: str, timeout: float):
     target = f"{parts.path or '/'}"
     if parts.query:
         target += f"?{parts.query}"
+    peer = None
     if parts.scheme == "https":
         context = ssl.create_default_context()
         connection = http.client.HTTPSConnection(
@@ -61,13 +62,18 @@ def _default_fetch_hop(url: str, method: str, timeout: float):
     try:
         try:
             connection.connect()  # TCP (+TLS handshake) phase
+            # grab the peer cert right after the handshake: the certificate is
+            # fixed at connect time, and servers answering `Connection: close`
+            # (Citrix/NetScaler style) make http.client tear the socket down
+            # inside getresponse() - self.sock is None by the time we read it
+            if parts.scheme == "https" and connection.sock is not None:
+                peer = connection.sock.getpeercert(binary_form=True)
         except TimeoutError:
             raise FetchTimeout("connect") from None
         try:
             connection.request(method, target, headers={"Accept": "*/*", "User-Agent": f"surface-intel/{__version__}"})
             response = connection.getresponse()
             body = response.read(_BODY_CAP)
-            peer = connection.sock.getpeercert(binary_form=True) if parts.scheme == "https" else None
         except TimeoutError:
             raise FetchTimeout("app_layer") from None
         headers = {key.lower(): value for key, value in response.getheaders()}
@@ -212,8 +218,13 @@ class SafeHttpFetchClient:
 
 
 def _host_allowed(host: str, allowed_hosts: tuple[str, ...]) -> bool:
-    for entry in allowed_hosts:
-        entry = entry.strip().lower().lstrip("*.").rstrip(".")
+    for raw_entry in allowed_hosts:
+        entry = raw_entry.strip().lower()
+        if entry == "*":
+            # bare "*" is the documented full-wildcard scope (SKILL scope
+            # template "authorized_domains": ["*"]) - authorize any host
+            return True
+        entry = entry.lstrip("*.").rstrip(".")
         if not entry:
             continue
         if host == entry or host.endswith("." + entry):
