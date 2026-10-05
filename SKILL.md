@@ -1,13 +1,28 @@
 ---
 name: surface-intel
-description: Drive attack-surface information collection from this project — iterative FOFA investigation (MCP) ping-ponged with the surface-intel tool (self-contained in this skill directory) doing passive/active verification scans, merging into a risk-prioritized collection report. Use when the user mentions surface-intel, 攻击面, 资产测绘/资产收集, 信息收集, FOFA 调查/查询, 子域名/证书/注册数据, or asks to run/merge/report a recon task. Standing authorization: this project runs pre-authorized recon — pass --real --confirm-real directly, no confirmation loop.
+description: Drive attack-surface information collection from this project — iterative FOFA investigation (MCP) ping-ponged with the surface-intel tool (self-contained in this skill directory) doing passive/active verification scans, merging into a risk-prioritized collection report. Use when the user mentions surface-intel, 攻击面, 资产测绘/资产收集, 信息收集, FOFA 调查/查询, 子域名/证书/注册数据, or asks to run/merge/report a recon task. For targets the user holds an authorization letter (or equivalent lawful basis) for, this project runs pre-authorized recon — pass --real --confirm-real directly, no per-command confirmation loop.
 ---
 
 # surface-intel 信息收集操作手册（FOFA ↔ 工具双向迭代）
 
-本 skill **自包含**:`surface-intel` 工具项目就在本 skill 目录内(SKILL.md 与项目同仓,只调用、不修改)。**本项目为常驻授权的信息收集**:所有真实命令一律直接带 `--real --confirm-real`,不做授权征询;scope 默认全通配(见模板),工具不构成任何收集边界——唯一的动态门控是端口,发现即补。
+本 skill **自包含**:`surface-intel` 工具项目就在本 skill 目录内(SKILL.md 与项目同仓,只调用、不修改)。**适用前提**:本 skill 服务于使用方已持有授权书(或同等合法授权基础)的目标项目——接手新目标时先确认授权基础存在;工具旗标与 scope 写法不构成授权本身,只是授权已存在时的操作方式。在此前提下本项目按**常驻授权**运转:真实命令直接带 `--real --confirm-real`,不逐命令征询(边界与升级见下节);scope 默认全通配(见模板)以收集最大化,归属甄别由叙事报告承担——工具侧唯一保留的动态门控是端口,发现即补。
 
-**授权边界(2026-10-05 实测红线)**:常驻授权只覆盖**信息收集两档**(被动收集 + GET 级访问,见「授权分层与 ROE 升级」节)。对**敏感端口(数据库/RDP/SSH)的主动探测批量会被 harness 权限分类器拦截**——判定口径"OSINT 资产收集 ≠ 主动端口探测,自写全通配 scope 不代表用户意图"。此时不绕行(换工具/拆小包/子代理都是绕过),正确姿势:①端口状态以 FOFA 快照记录并标注"未实测复核";②需实证时向用户提出 ROE 计划,由用户显式授权(并确认其对目标系统持有合法授权)后按 ROE 分层执行。
+**授权边界(2026-10-05 定稿)**:授权口径 = **授权书最高档**(含入侵性测试),唯一红线"**不破坏业务**"。授权基础永远锚定在使用方对具体目标持有的授权书上——换目标即换授权依据,不跨目标继承。
+
+### 授权分层与 ROE 升级
+
+| 层 | 内容 | 放行口径 |
+| -- | ---- | -------- |
+| L1 | 被动收集(FOFA/CT/DNS/RDAP/CDX/urlscan/泄露面) | 授权目标默认放行 |
+| L2 | GET 级访问(http-observe/curl/browser-observe) | 授权目标默认放行 |
+| L3 | 深挖(XHR/fetch 响应体、版本串、chrome-devtools 直驱) | 授权目标默认放行(仍只读) |
+| L4 | 入侵性测试(对确认目标) | 按 T0-T2 计划执行,单线程限速 |
+
+入侵性测试分层(实战模板,CeramTec R2 验证过):**T0** 端口复核(banner 抓取,单线程间隔≥1s)→ **T1** 版本指纹(对表 `[SKILL_DIR]/docs/component-checklist.md`)→ **T2a** 特定路径存在性(如 BshServlet,GET 即止)→ **T2b** 受控回显验证(如 Log4Shell,dnslog.org 经浏览器 MCP 申请/查回显,触发后主动查)。
+
+**止损清单**(触发即停,报告用户):业务报错/5xx 激增、WAF/IDS 拦截告警、目标侧变更联系方式、任何疑似破坏业务的副作用。
+
+**harness 分类器拦截处理**(实测:port-check 批量探数据库/RDP/SSH 端口会被拦,判定"OSINT≠主动端口探测"):**不绕行**(换工具/拆小包/子代理都是绕过);正确姿势=报告用户→用户显式确认其对目标持有合法授权→重试放行。等待期间端口状态以 FOFA 快照记录并标注"未实测复核"。
 
 ## 部署与路径约定(迁移必读)
 
@@ -325,5 +340,7 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 2026-10-05 **B6/B7 工具侧批量与差量报告落地**:surface-intel `5901192`(437 tests)——`http-observe`/`port-check` 原生 `--targets <file>`(每行一条,单台失败不中断,退出码 0/1/2=全成/有失败/用法错);新命令 `diff-report`(checkpoint 差量→markdown 一页,落 `reports/<task-id>/`)。顺带修 Database 连接泄漏(`with self.connect()` 从不 close,WAL checkpoint 时机挂在 GC 上,改 `contextlib.closing`)。同日 A 组浏览器实测闭环:playwright 链路 `b252ca5`(426 tests)+ chrome-devtools 直驱实测(SKILL.md「chrome-devtools 直驱深挖层」)。
 
 2026-10-05 **D 包批量修复完成**:fofa-mcp `e851ed1`(0.2.0,76 tests)——`fofa_search`/`fofa_search_structured` 现在登记 next 游标,`fofa_search_next(next_token, cursor_page=上一页+1)` 翻页流程真正可用(游标绑定 task_id/query/fields,进程内存态,服务重启即失效重查);配额/F 点不足=不可重试立即换号,全账号失败抛最后一个真实错误;单次调用总时限 90s。surface-intel `63bd6a3`(0.2.0)——playwright health 判活修复+截图落 `reports/<task-id>/screenshots/`+网络摘要真正落库;限速默认接线(ct 2s/rdap 1s,env `SURFACE_INTEL_MIN_INTERVAL_<ADAPTER>` 可调);无 action 行任务 report integrity 正常报 complete;baseline-save 不再破坏 resume;`baseline-diff --baseline <id> --output <path>` 支持任意两次对比。此前 2026-10-04 的 18 项修复见 master `72f83e3`(checkpoint:`docs/checkpoints/FIX-2026-10-04-issues-batch.md`)。行为与手册不符时,先查 `[WORK_ROOT]/docs/surface-intel-issues.md` 与两个 checkpoint,再更新本手册。
+
+2026-10-05 **C+ 修复批落地**(`7af95e0`+`bc9463b`,448+76 tests 双绿):P01 recon 泄漏根治(close 有序关停+3.14 StreamReader/_transport 坑)、P02 引号 fail-fast、P03 错误分类阶段化(timeout_connect/timeout_app_layer、tls_failure_kind)、P04 result.json payload 对象展开(保留 payload_json 字符串)、P05 fofa-mcp fields 全量(cert/status_code)、P16 headers 全量落库(白名单删除)、D-1 init --scaffold、D-2 report --deliver/--round/--title 双写、D-3 port-check banner+open_no_banner。通用脚本迁入 `scripts/`(xlsx 交付路径参数化、t0 banner 兜底);目录规范改多项目 `projects/<p>/` 结构;junction 单源化(`~/.claude/skills/surface-intel` → 本仓);授权节改写为锚定使用方对具体目标持有的授权书(P07/P08,用户 2026-10-05 批复措辞)。
 
 **待办 backlog**:`[WORK_ROOT]/docs/surface-intel-backlog.md`(工作流扩展/交付脚本)——每次任务开始前先过一遍,完成即勾选。
