@@ -1164,11 +1164,15 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def _deliver_report(report: dict, *, task_root: Path, task_id: str,
                     round_label: str | None, title: str | None) -> dict:
-    """D-2: double-write the deliverable workbooks to <task-root>/../reports/
-    as {round}_{date}_{title}[_analyst].xlsx. Round and title pass through from
-    the operator verbatim - the tool never invents semantics; missing ones
-    degrade to a neutral deliver_ prefix. The narrative md stays agent-authored
-    and is written straight into the same directory."""
+    """D-2 (rev 2026-10-05): copy the tool workbook to <task-root>/../reports/
+    as {round}_{date}_{title}.xlsx - a placeholder at the tool-export format.
+    The delivered xlsx has a FIXED format: the 5-sheet workbook from
+    scripts/build_deliverable_xlsx.py (project data variant) overwrites this
+    placeholder under the same name as the final delivery step. The analyst
+    export is no longer copied into the delivery directory (dropped per
+    operator decision - analyst.xlsx format is not a deliverable). The
+    narrative md stays agent-authored and is written straight into the same
+    directory."""
     import shutil
     from datetime import datetime
 
@@ -1178,16 +1182,11 @@ def _deliver_report(report: dict, *, task_root: Path, task_id: str,
     deliver_dir = task_root.parent / "reports"
     deliver_dir.mkdir(parents=True, exist_ok=True)
     copied: dict[str, str] = {}
-    sources = []
     if export.get("xlsx_status") == "exported" and export.get("xlsx"):
-        sources.append((Path(export["xlsx"]), f"{stem}.xlsx"))
-    analyst = export.get("analyst_report") or {}
-    if analyst.get("status") == "exported" and analyst.get("path"):
-        sources.append((Path(analyst["path"]), f"{stem}_analyst.xlsx"))
-    for src, name in sources:
+        src = Path(export["xlsx"])
         if src.exists():
-            shutil.copy2(src, deliver_dir / name)
-            copied[name] = str(deliver_dir / name)
+            shutil.copy2(src, deliver_dir / f"{stem}.xlsx")
+            copied[f"{stem}.xlsx"] = str(deliver_dir / f"{stem}.xlsx")
     return {"dir": str(deliver_dir), "files": copied}
 
 

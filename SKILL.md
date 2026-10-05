@@ -70,7 +70,7 @@ uv run --directory [SKILL_DIR] surface-intel
 ```
 
 - **骨架一键拉起**:`uv run --directory [SKILL_DIR] surface-intel init [WORK_ROOT]/projects/<项目>/task --scaffold`——建 task/ 的同时在上级创建 `inputs/ reports/ data/` + NOTES.md 模板(幂等,已有不覆盖)。
-- **三条流向规则**:①工具产出永落 `task/reports/<task-id>/`;②交付两件由 `report --deliver` 双写至 `projects/<p>/reports/`(工具不猜语义,轮次/主题由操作方传);③`[SKILL_DIR]/scripts/` 通用脚本路径全参数化(`--result-json/--out` 等),数据列按项目在脚本内定制。
+- **三条流向规则**:①工具产出永落 `task/reports/<task-id>/`;②交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 生成,项目数据版随项目放 `data/`)——`report --deliver` 只复制一份工具导出格式的占位 xlsx 到 `projects/<p>/reports/`,最终交付前被同名的 5-sheet 工作簿覆盖;`_analyst.xlsx` 不入交付目录(2026-10-05 操作方裁定,格式非交付件);③`[SKILL_DIR]/scripts/` 通用脚本路径全参数化(`--result-json/--out` 等),数据列按项目在脚本内定制。
 
 ## 工作流总览
 
@@ -262,15 +262,19 @@ diff 工具轮新揭示 vs FOFA 已知集,任何一项命中就回 Phase 1 做�
 ```bash
 # 单任务报告(工具产出永落 task/reports/<task-id>/)
 uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task [--reveal-emails]
-# 交付双写:--deliver 把两份 xlsx 复制到 projects/<项目>/reports/,命名 {轮次}_{日期}_{主题}.xlsx(轮次/主题由操作方传,工具不猜语义)
+# 占位复制:--deliver 把工具导出 xlsx 复制到 projects/<项目>/reports/ 作占位,命名 {轮次}_{日期}_{主题}.xlsx(轮次/主题由操作方传,工具不猜语义)
 uv run --directory [SKILL_DIR] surface-intel report <task-id> --task-root [WORK_ROOT]/projects/<项目>/task --deliver --round R2 --title 中国区资产核查
+# 最终交付 xlsx(固定 5-sheet 格式,同名覆盖上面的占位件;数据段=项目定制版,放 projects/<项目>/data/):
+uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py \
+        --result-json [WORK_ROOT]/projects/<项目>/task/reports/<task-id>/result.json \
+        --out [WORK_ROOT]/projects/<项目>/reports/{轮次}_{日期}_{主题}.xlsx
 # 多任务合并工作簿
 uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-root [WORK_ROOT]/projects/<项目>/task
 ```
 
-**最终交付物固定两件**：
+**最终交付物固定两件**（xlsx 格式固定,自 2026-10-05 起任何轮次不再变体）：
 
-1. **xlsx 结构化工作簿**——5 张 sheet、多做列少做 sheet，固定顺序与分工：
+1. **xlsx 结构化工作簿**（**固定 5-sheet 格式**——上一步 `build_deliverable_xlsx.py` 产物,同名覆盖 `--deliver` 占位件;工具导出格式的 xlsx 与 `_analyst.xlsx` 均不是交付件）——5 张 sheet、多做列少做 sheet，固定顺序与分工：
 
    | #   | Sheet            | 要点                                                                                                                                                                                                                                                   |
    | --- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -284,7 +288,7 @@ uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-
 
 2. **md 叙事报告**——形态对齐项目内既有范例(如 ceramtec 项目 `R1_2026-10-04_全球面FOFA.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。md 直写 `projects/<项目>/reports/`(与 xlsx 同名配对)。
 
-工具 analyst_report.xlsx 是数据底稿；email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
+工具 analyst_report.xlsx 是数据底稿(留 `task/reports/<task-id>/` 供 5-sheet 生成器取数,不复制进交付目录);email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
 
 ## scope.json 模板(全通配,收集优先)
 
@@ -342,5 +346,7 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 2026-10-05 **D 包批量修复完成**:fofa-mcp `e851ed1`(0.2.0,76 tests)——`fofa_search`/`fofa_search_structured` 现在登记 next 游标,`fofa_search_next(next_token, cursor_page=上一页+1)` 翻页流程真正可用(游标绑定 task_id/query/fields,进程内存态,服务重启即失效重查);配额/F 点不足=不可重试立即换号,全账号失败抛最后一个真实错误;单次调用总时限 90s。surface-intel `63bd6a3`(0.2.0)——playwright health 判活修复+截图落 `reports/<task-id>/screenshots/`+网络摘要真正落库;限速默认接线(ct 2s/rdap 1s,env `SURFACE_INTEL_MIN_INTERVAL_<ADAPTER>` 可调);无 action 行任务 report integrity 正常报 complete;baseline-save 不再破坏 resume;`baseline-diff --baseline <id> --output <path>` 支持任意两次对比。此前 2026-10-04 的 18 项修复见 master `72f83e3`(checkpoint:`docs/checkpoints/FIX-2026-10-04-issues-batch.md`)。行为与手册不符时,先查 `[WORK_ROOT]/docs/surface-intel-issues.md` 与两个 checkpoint,再更新本手册。
 
 2026-10-05 **C+ 修复批落地**(`7af95e0`+`bc9463b`,448+76 tests 双绿):P01 recon 泄漏根治(close 有序关停+3.14 StreamReader/_transport 坑)、P02 引号 fail-fast、P03 错误分类阶段化(timeout_connect/timeout_app_layer、tls_failure_kind)、P04 result.json payload 对象展开(保留 payload_json 字符串)、P05 fofa-mcp fields 全量(cert/status_code)、P16 headers 全量落库(白名单删除)、D-1 init --scaffold、D-2 report --deliver/--round/--title 双写、D-3 port-check banner+open_no_banner。通用脚本迁入 `scripts/`(xlsx 交付路径参数化、t0 banner 兜底);目录规范改多项目 `projects/<p>/` 结构;junction 单源化(`~/.claude/skills/surface-intel` → 本仓);授权节改写为锚定使用方对具体目标持有的授权书(P07/P08,用户 2026-10-05 批复措辞)。
+
+2026-10-05 **D-2 修订(操作方裁定,R3 复测轮触发)**:交付 xlsx **格式固定为 5-sheet 工作簿**(build_deliverable_xlsx.py 项目数据版);`report --deliver` 改单写——只复制工具导出 xlsx 作同名占位件,`_analyst.xlsx` 不再复制进交付目录(analyst 格式非交付件;底稿仍留 `task/reports/<task-id>/` 供取数)。最终交付前 5-sheet 工作簿同名覆盖占位件,交付目录只留 `R{n}_{日期}_{主题}.xlsx + .md` 两件。
 
 **待办 backlog**:`[WORK_ROOT]/docs/surface-intel-backlog.md`(工作流扩展/交付脚本)——每次任务开始前先过一遍,完成即勾选。

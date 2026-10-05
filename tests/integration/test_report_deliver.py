@@ -30,16 +30,19 @@ def test_init_scaffold_pulls_up_project_skeleton(tmp_path):
     assert cmd_init(args) == 0  # idempotent
 
 
-def test_deliver_double_writes_with_round_and_title(tmp_path):
+def test_deliver_copies_placeholder_xlsx_only(tmp_path):
     task_root = tmp_path / "proj" / "task"
     _seed(task_root)
     args = Namespace(task_root=str(task_root), task_id="t", merge_tasks=None,
                      reveal_emails=False, deliver=True, round="R2", title="复查")
     assert cmd_report(args) == 0
     names = sorted(p.name for p in (tmp_path / "proj" / "reports").iterdir())
+    # single write: the tool workbook is a placeholder - the delivered xlsx
+    # format is FIXED to the 5-sheet workbook (build_deliverable_xlsx.py
+    # overwrites it under the same name); analyst export is not a deliverable
     assert any(name.startswith("R2_") and name.endswith("_复查.xlsx") for name in names)
-    assert any(name.startswith("R2_") and name.endswith("_复查_analyst.xlsx") for name in names)
-    # delivery is a double-write - the per-task evidence stays in place
+    assert not any("analyst" in name for name in names)
+    # delivery is a copy - the per-task evidence stays in place
     assert (task_root / "reports" / "t").is_dir()
 
 
