@@ -2,6 +2,7 @@
 name = "fofa-mcp"
 version = "0.2.0"
 description = "Secure, agent-friendly FOFA MCP server"
+license = {text = "GPL-3.0-or-later"}
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

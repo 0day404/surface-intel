@@ -3,7 +3,7 @@
 ## 阶段
 
 实测问题全量修复（issues 来源：`E:\Work\Claude\sec\docs\surface-intel-issues.md`，
-CeramTec 三任务实测 18 条，A/B/C/D 四类）。
+ClientCorp 三任务实测 18 条，A/B/C/D 四类）。
 
 ## 目标
 

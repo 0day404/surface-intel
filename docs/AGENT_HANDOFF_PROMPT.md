@@ -5,8 +5,8 @@
 
 > 路径约定：`<REPO_ROOT>` = 本仓库根（本文件所在仓库的顶层目录）；
 > `<FOFA_MCP_ROOT>` = fofa-mcp 子项目根（已 vendored 于本仓库
-> `<REPO_ROOT>/fofa-mcp/`，保持独立版本与测试；解析顺序：env
-> `SURFACE_INTEL_FOFA_ROOT` > 内置 `<REPO_ROOT>/fofa-mcp/` > 历史路径
+> `<REPO_ROOT>/mcp/fofa-mcp/`，保持独立版本与测试；解析顺序：env
+> `SURFACE_INTEL_FOFA_ROOT` > 内置 `<REPO_ROOT>/mcp/fofa-mcp/` > 历史路径
 > `E:\Work\Copilot\fofa-mcp`）。本仓库可整体迁移，位置不固定。
 
 ```text
@@ -38,7 +38,7 @@
 ```
 
 `surface-intel` 只能通过 Adapter 和 MCP stdio 客户端调用 FOFA。fofa-mcp 虽然
-vendored 在本仓库 `fofa-mcp/`，仍按独立子项目对待：未经批准不得重写或修改，
+vendored 在本仓库 `mcp/fofa-mcp/`，仍按独立子项目对待：未经批准不得重写或修改，
 也不能把跨源编排逻辑写入该项目。
 
 Playwright MCP 是外部组件，命令为：
@@ -97,7 +97,7 @@ rtk uv run pytest -q
 
 R2 升级依据（原 `bounded` 升级条件已满足）：R3-R7 的限制、覆盖、预算、归并
 和主动观察能力已全部实现并通过 420 项五类测试；2026-10-04 在授权目标
-`www.ceramtec-group.cn` 上完成真实全链 smoke（FOFA 查询/拆批 + 归并 +
+`www.example.com` 上完成真实全链 smoke（FOFA 查询/拆批 + 归并 +
 架构门控 + Safe HTTP/Port 主动观察），期间发现并修复 3+1 个真实缺陷。
 真实多页分页与更大范围授权的持续监控仍以单次授权任务为单位执行。
 
@@ -236,21 +236,21 @@ JSON 是主结果，XLSX 是可重建副本。报告已经包含 FOFA 计划、�
 用户明确授权了：
 
 ```text
-www.ceramtec-group.cn
+www.example.com
 ```
 
-这是苏州赛琅泰克高技术陶瓷有限公司的授权渗透测试项目目标。本次只允许并且
+这是示例公司的授权渗透测试项目目标。本次只允许并且
 只执行了 FOFA 被动查询：
 
 ```text
-domain="www.ceramtec-group.cn"
+domain="www.example.com"
 ```
 
 任务：
 
 ```text
 task-9542e3d99077458c
-scope_version = ceramtec-fofa-v1
+scope_version = client-fofa-v1
 batch = fofa-batch-7e50b596bb344fef
 ```
 
@@ -269,9 +269,9 @@ batch = fofa-batch-7e50b596bb344fef
 Set-Location <REPO_ROOT>
 rtk uv run surface-intel fofa-health --real
 rtk uv run surface-intel fofa-search `
-  --task-root .\runtime\ceramtec-fofa-20261003 `
+  --task-root .\runtime\client-fofa-20261003 `
   task-9542e3d99077458c `
-  --domain www.ceramtec-group.cn `
+  --domain www.example.com `
   --size 10 --real --confirm-real
 ```
 

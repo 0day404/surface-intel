@@ -1,23 +1,23 @@
-# R7 checkpoint: CeramTec FOFA full-chain real smoke (R7 acceptance)
+# R7 checkpoint: ClientCorp FOFA full-chain real smoke (R7 acceptance)
 
 ## 授权与边界
 
-- 目标：`www.ceramtec-group.cn`（苏州赛琅泰克高技术陶瓷有限公司，用户确认
+- 目标：`www.example.com`（示例公司，用户确认
   的已授权渗透测试项目目标，与 R2 smoke 同一授权）
 - 主动等级：`passive_only`（active_testing_allowed=false）
-- 外部动作：仅 FOFA 被动查询 `domain="www.ceramtec-group.cn"`，size=10，
+- 外部动作：仅 FOFA 被动查询 `domain="www.example.com"`，size=10，
   消耗 0 F 点（batch `fofa-batch-0cee42a3b60745a4`）
 - 未执行目标直连、端口扫描、浏览器观察或业务操作
 
 ## 执行链路（R7 全链首次真实验证）
 
-干净任务根 `runtime/ceramtec-r7-smoke-20261004/`：
+干净任务根 `runtime/client-r7-smoke-20261004/`：
 `init → create → preflight（3 目标规范化）→ plan（3 被动动作）→
 fofa-search --real → merge → baseline-save → baseline-diff → report`
 
-- task：`task-745c9d216873491a`，scope `ceramtec-r7-smoke-v1`
-- FOFA 结果：2 条观察（HTTPS/443 与 HTTP/80，ip 116.255.206.92，标题
-  "CeramTec – The Ceramic Experts"），证据脱敏落盘，consumed_fpoints=0
+- task：`task-745c9d216873491a`，scope `client-r7-smoke-v1`
+- FOFA 结果：2 条观察（HTTPS/443 与 HTTP/80，ip 192.0.2.1，标题
+  "ClientCorp"），证据脱敏落盘，consumed_fpoints=0
 - 归并：5 资产（2 domain confirmed + 1 ip candidate + 2 service candidate）、
   4 关系（fofa_host_ip/fofa_domain_ip/service_ip）、0 冲突；IP 与服务
   正确保持 candidate（IP 未列入授权清单，开放/解析≠授权）

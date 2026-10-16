@@ -28,7 +28,7 @@ class FetchTimeout(TimeoutError):
 
     "connect" means the TCP (or TLS handshake) never completed; "app_layer"
     means the pipe is up but the service never answered - the distinction the
-    58.210.136.131:8601 case (FOFA saw it open, HTTP probe hung) needed.
+    192.0.2.2:8601 case (FOFA saw it open, HTTP probe hung) needed.
     """
 
     def __init__(self, phase: str):

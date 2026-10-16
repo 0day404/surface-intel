@@ -7,7 +7,7 @@
 
 ## 授权与边界
 
-- 目标：`www.ceramtec-group.cn` / `ceramtec-group.cn`（用户确认的已授权
+- 目标：`www.example.com` / `example.com`（用户确认的已授权
   渗透测试项目，2026-10-04 明确授权本轮 ①②③）
 - ① 主动部分：safe_discovery、显式端口清单 [80, 443]、GET only
 - ② 被动部分：FOFA 复合查询 size=10、会话预算护栏内
@@ -30,9 +30,9 @@
 
 - 4110 字符复合查询强制拆批 → **2 个真实批次独立完成**（batch-1: 2 条、
   batch-2: 8 条），单批失败隔离语义未触发但路径已真实验证
-- 真实新发现：`tracking.ceramtec-group.cn` 与
-  `5b84c834.ceramtec-group.cn`（CDN/SaaS 验证型随机子域，解析到 EU IP
-  91.132.200.52）——归并后 10 资产（4 domain confirmed + 2 ip candidate +
+- 真实新发现：`tracking.example.com` 与
+  `5b84c834.example.com`（CDN/SaaS 验证型随机子域，解析到 EU IP
+  192.0.2.5）——归并后 10 资产（4 domain confirmed + 2 ip candidate +
   4 service candidate）、2 third_party 架构标记
 - 真实多页未触发：授权数据集不足一页（has_more=false）；分页机制
   （cursor/next_token）由 R2 契约测试覆盖——如实记录为限制
@@ -74,10 +74,10 @@ uv run pytest -q
 
 ## 真实数据资产发现摘要（可交付）
 
-- 主站 www.ceramtec-group.cn @ 116.255.206.92（CN），HTTPS/443 + HTTP/80，
+- 主站 www.example.com @ 192.0.2.1（CN），HTTPS/443 + HTTP/80，
   重定向至 /zh/
-- tracking.ceramtec-group.cn、5b84c834.ceramtec-group.cn @
-  91.132.200.52（EU）——第三方追踪/验证类子域，已标记 third_party 待复核
+- tracking.example.com、5b84c834.example.com @
+  192.0.2.5（EU）——第三方追踪/验证类子域，已标记 third_party 待复核
 - 全部归并数据可通过 `report` 命令重建（JSON 十六节 + XLSX 十六表）
 
 ## 下一步

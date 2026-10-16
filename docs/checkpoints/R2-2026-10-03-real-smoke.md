@@ -1,18 +1,18 @@
-# R2 checkpoint: CeramTec FOFA real smoke test
+# R2 checkpoint: ClientCorp FOFA real smoke test
 
 ## 授权与边界
 
-- 目标：`www.ceramtec-group.cn`
+- 目标：`www.example.com`
 - 授权依据：用户明确确认该域名属于已授权渗透测试项目
 - 主动等级：`passive_only`
-- 查询：`domain="www.ceramtec-group.cn"`
+- 查询：`domain="www.example.com"`
 - 页面大小：10
 - 未执行目标直连、端口扫描、浏览器观察或业务操作
 
 ## 任务
 
 - task id：`task-9542e3d99077458c`
-- scope version：`ceramtec-fofa-v1`
+- scope version：`client-fofa-v1`
 - batch id：`fofa-batch-7e50b596bb344fef`
 - 结果：`completed`
 - 页数：1
@@ -24,7 +24,7 @@ SQLite 的 `evidence` 与 `observation` 表。未将 stats 或摘要直接转为
 ## 报告验证
 
 ```powershell
-uv run surface-intel report --task-root .\runtime\ceramtec-fofa-20261003 task-9542e3d99077458c
+uv run surface-intel report --task-root .\runtime\client-fofa-20261003 task-9542e3d99077458c
 ```
 
 已生成 `result.json` 和 `result.xlsx`，报告完整性状态为 `complete`。

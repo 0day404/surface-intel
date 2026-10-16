@@ -18,9 +18,9 @@ description: Drive attack-surface information collection from this project — i
 | L3 | 深挖(XHR/fetch 响应体、版本串、chrome-devtools 直驱) | 授权目标默认放行(仍只读) |
 | L4 | 入侵性测试(对确认目标) | 按 T0-T2 计划执行,单线程限速 |
 
-入侵性测试分层(实战模板,CeramTec R2 验证过):**T0** 端口复核(banner 抓取,单线程间隔≥1s)→ **T1** 版本指纹(对表 `[SKILL_DIR]/docs/component-checklist.md`)→ **T2a** 特定路径存在性(如 BshServlet,GET 即止)→ **T2b** 受控回显验证。
+入侵性测试分层(实战模板,ClientCorp R2 验证过):**T0** 端口复核(banner 抓取,单线程间隔≥1s)→ **T1** 版本指纹(对表 `[SKILL_DIR]/docs/component-checklist.md`)→ **T2a** 特定路径存在性(如 BshServlet,GET 即止)→ **T2b** 受控回显验证。
 
-**T2b 默认形态(2026-10-06 CeramTec R1 定稿):dnslog 优先浏览器 MCP 直驱 `https://dnslog.org`**——调用序列:`new_page(about:blank)`→`navigate_page`→snapshot 找 **Get Sub Domain** 按钮点击取子域→**curl 单线程触发 payload**→浏览器点 **Get Results** 读回显(15s 延迟后再刷一次,排除 DNS 传播延迟)。铁则:①**发包前先验通道读写两侧**再触发(dnslog.cn 实测 getdomain 可用但读侧 404,触发了也读不到;oast/interactsh 注册需 RSA 握手,curl 不可行);②payload 最小副作用序:纯 JVM 求值(`print`/`URL.connect`,无 OS 命令)> DNS 回连(`exec ping`)> 不做;不做混淆/参数 fuzz(那是过滤绕过,超出受控验证);③目标侧"连接被掐断"形态=过滤层行为而非打挂,探测后必做良性请求复核业务无恙;jndi/SQLi 探测被 404+`securityIntercept` 头类响应拒绝时如实记"不适用/已防护",不换花样重试。
+**T2b 默认形态(2026-10-06 ClientCorp R1 定稿):dnslog 优先浏览器 MCP 直驱 `https://dnslog.org`**——调用序列:`new_page(about:blank)`→`navigate_page`→snapshot 找 **Get Sub Domain** 按钮点击取子域→**curl 单线程触发 payload**→浏览器点 **Get Results** 读回显(15s 延迟后再刷一次,排除 DNS 传播延迟)。铁则:①**发包前先验通道读写两侧**再触发(dnslog.cn 实测 getdomain 可用但读侧 404,触发了也读不到;oast/interactsh 注册需 RSA 握手,curl 不可行);②payload 最小副作用序:纯 JVM 求值(`print`/`URL.connect`,无 OS 命令)> DNS 回连(`exec ping`)> 不做;不做混淆/参数 fuzz(那是过滤绕过,超出受控验证);③目标侧"连接被掐断"形态=过滤层行为而非打挂,探测后必做良性请求复核业务无恙;jndi/SQLi 探测被 404+`securityIntercept` 头类响应拒绝时如实记"不适用/已防护",不换花样重试。
 
 **止损清单**(触发即停,报告用户):业务报错/5xx 激增、WAF/IDS 拦截告警、目标侧变更联系方式、任何疑似破坏业务的副作用。
 
@@ -34,12 +34,12 @@ description: Drive attack-surface information collection from this project — i
 | ----------------- | ---------------------------------------------------------- | --------------------------------- |
 | `[SKILL_DIR]`     | 本 skill 目录绝对路径(=工具项目根,含 pyproject.toml)       | `E:/Work/AI/Skills/surface-intel` |
 | `[WORK_ROOT]`     | 使用本 skill 的工作项目根(任务/报告/目标清单/清单位于其下) | `E:/Work/Claude/sec`              |
-| `[FOFA_MCP_ROOT]` | fofa-mcp 子项目根(已内置在 skill 目录内)                   | `[SKILL_DIR]/fofa-mcp`            |
+| `[FOFA_MCP_ROOT]` | fofa-mcp 子项目根(已内置在 skill 目录内)                   | `[SKILL_DIR]/mcp/fofa-mcp`      |
 
 **迁移到新机器/新位置的三步**:
 
-1. 把整个 skill 目录(含内置的 `fofa-mcp/` 子项目与 `pyproject.toml`/`src`/`tests`/`docs`)拷到任意位置即完成部署——fofa-mcp 随目录整体走。工具侧三级解析(代码 `_default_fofa_root()`):env `SURFACE_INTEL_FOFA_ROOT` > 内置 `[SKILL_DIR]/fofa-mcp` > 历史路径 `E:\Work\Copilot\fofa-mcp`(旧机兼容兜底)。
-2. 首次运行前在 `[SKILL_DIR]` 与 `[SKILL_DIR]/fofa-mcp` 各 `uv sync`(或让 `uv run` 首次自动装);FOFA 凭据在内置子项目的 `[SKILL_DIR]/fofa-mcp/.env`(从不进入本工具,git 已忽略)。
+1. 把整个 skill 目录(含内置的 `mcp/fofa-mcp/` 子项目与 `pyproject.toml`/`src`/`tests`/`docs`)拷到任意位置即完成部署——fofa-mcp 随目录整体走。工具侧三级解析(代码 `_default_fofa_root()`):env `SURFACE_INTEL_FOFA_ROOT` > 内置 `[SKILL_DIR]/mcp/fofa-mcp` > 历史路径 `E:\Work\Copilot\fofa-mcp`(旧机兼容兜底)。
+2. 首次运行前在 `[SKILL_DIR]` 与 `[SKILL_DIR]/mcp/fofa-mcp` 各 `uv sync`(或让 `uv run` 首次自动装);FOFA 凭据在内置子项目的 `[SKILL_DIR]/mcp/fofa-mcp/.env`(从不进入本工具,git 已忽略)。
 3. 确定本工作项目的 `[WORK_ROOT]`,在其 `docs/` 下维护 `surface-intel-backlog.md`(待办)与 `surface-intel-issues.md`(问题清单)。
 
 **书写规则**(实测约束):
@@ -187,7 +187,7 @@ nslookup -type=ANY domain                          # DNS 交叉验证(工具 dns
 
 分工:**curl 拿全量原始返回包供分析**(安全头缺失、指纹、跳转链),**http-observe 把同一事实证据化入库**(observation+evidence 可追溯)——高价值目标两者都做,普通目标 http-observe 即可。
 
-**T0 端口复核(L4 第一层,实战模板 CeramTec R2)**:常规走 `port-check`——D-3 起非 TLS 端口 connect 后被动读一次 banner(SSH/SMTP/FTP/MySQL 问候语直接落 evidence),连接后无问候的静默端口报 `open_no_banner`("TCP 通但服务不应答",8601 形态),TLS 端口以证书摘要为证。R3 修复起 `open_no_banner` 内部再分两形态:`error_type=closed_after_accept`=accept 后干净 EOF 即关(tarpit/加固形态,官网 3306 形);无 error_type=静默挂住不动(8601 形)。工具不可用时的兜底:`python [SKILL_DIR]/scripts/t0_banner_grab.py --targets-file targets.json --out <项目>/data/t0-results.json`(单线程/间隔≥1s/recv 256 即止)。
+**T0 端口复核(L4 第一层,实战模板 ClientCorp R2)**:常规走 `port-check`——D-3 起非 TLS 端口 connect 后被动读一次 banner(SSH/SMTP/FTP/MySQL 问候语直接落 evidence),连接后无问候的静默端口报 `open_no_banner`("TCP 通但服务不应答",8601 形态),TLS 端口以证书摘要为证。R3 修复起 `open_no_banner` 内部再分两形态:`error_type=closed_after_accept`=accept 后干净 EOF 即关(tarpit/加固形态,官网 3306 形);无 error_type=静默挂住不动(8601 形)。工具不可用时的兜底:`python [SKILL_DIR]/scripts/t0_banner_grab.py --targets-file targets.json --out <项目>/data/t0-results.json`(单线程/间隔≥1s/recv 256 即止)。
 
 ### 工具发现约定(PATH 主动发现,P19)
 
@@ -287,9 +287,9 @@ uv run --directory [SKILL_DIR] surface-intel report --merge <task-id>... --task-
    | 4   | 风险点           | 紧跟资产表：优先级(P1-P4)/资产/发现/CVE 线索/依据/状态（**无"建议"列**,2026-10-05 裁定——处置动作写 md 叙事）                                                                                                                                                 |
    | 5   | 站点与服务       | 按宿主 IP 分组；"类型"列区分官网/BPM/VPN/云盘等，"管理面"列(是/否)吸收登录入口专项；**"HTTP 状态"与"返回头摘要"两列**体现返回包（server/content-type/x-powered-by/via/location/安全头缺失标注）；完整原始返回包(curl -sS -i)进 md 附录，仅收高价值目标 |
 
-   美观规范：表头深色填充白字、冻结首行、自动筛选、风险优先级条件着色（P1 红/P2 橙/P3 黄/P4 灰）、归属判定着色（自有绿/关联橙/第三方灰）、sheet tab 分区着色。生成方式：`uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py --result-json <项目>/task/reports/<task-id>/result.json --out <项目>/reports/<轮次>_<日期>_<主题>.xlsx`(脚本随 skill 走,路径全参数化;内含 CeramTec R2 实战样例,发现集/风险/归属数据列按项目在脚本内替换),数据源 = `report --merge` 产物 + observation/evidence + 代理分析列（风险表/归属判定/关系洞察由代理以结构化数据提供）。
+   美观规范：表头深色填充白字、冻结首行、自动筛选、风险优先级条件着色（P1 红/P2 橙/P3 黄/P4 灰）、归属判定着色（自有绿/关联橙/第三方灰）、sheet tab 分区着色。生成方式：`uv run --with openpyxl python [SKILL_DIR]/scripts/build_deliverable_xlsx.py --result-json <项目>/task/reports/<task-id>/result.json --out <项目>/reports/<轮次>_<日期>_<主题>.xlsx`(脚本随 skill 走,路径全参数化;内含 ClientCorp R2 实战样例,发现集/风险/归属数据列按项目在脚本内替换),数据源 = `report --merge` 产物 + observation/evidence + 代理分析列（风险表/归属判定/关系洞察由代理以结构化数据提供）。
 
-2. **md 叙事报告**——形态对齐项目内既有范例(如 ceramtec 项目 `R1_2026-10-04_全球面FOFA.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。md 直写 `projects/<项目>/reports/`(与 xlsx 同名配对)。
+2. **md 叙事报告**——形态对齐项目内既有范例(如 clientcorp 项目 `R1_2026-10-04_全球面FOFA.md`：区域资产清单/基础设施关系/服务清单/风险点按优先级带 CVE 线索/已修正判断/后续建议)。两文件互相引用：md 风险条目编号 = xlsx 风险表行号。风险表的 CVE 线索一律对 `[SKILL_DIR]/docs/component-checklist.md` 核出后填入，不凭记忆写编号。md 直写 `projects/<项目>/reports/`(与 xlsx 同名配对)。
 
 result.json 是唯一数据底稿(留 `task/reports/<task-id>/`,5-sheet 生成器与 AI 分析都从它取数);email 交付外发默认保持脱敏（`--reveal-emails` 默认关）。
 
@@ -331,7 +331,7 @@ uv run --directory [SKILL_DIR] surface-intel scope-amend <task-id> --task-root [
 - `ct-health` 只验配置不发请求(`verified:false` 是诚实标注);真实查询 failover 看 ct-search/recon 输出的 `failovers` 计数;`SURFACE_INTEL_CT_SOURCE=crtsh|ctlogs|auto`,ctlogs.dev 匿名 100 req/h。crt.sh `rate_limited/http_error` 重跑合法。
 - `port-check` 的 `allowed_ports` 空清单=零授权;`--allow-hosted-third-party` 只解除 third_party 拦截,cdn/waf/lb/cloud_hosting 始终拦。
 - merge 幂等可重复;同一 RDAP 记录多组织名不再互报 conflict,跨观察值集分歧才报 unresolved。
-- FOFA MCP(内置子项目 `[SKILL_DIR]/fofa-mcp`,仍按独立子项目对待——未经批准不修改,改动经本仓库 git 追溯,历史基线=原仓 `E:\Work\Copilot\fofa-mcp` 冻结于 `e851ed1`)未配置时返回 `not_configured`,不伪造结果;凭据只由它自己从 `.env` 读取。
+- FOFA MCP(内置子项目 `[SKILL_DIR]/mcp/fofa-mcp`,仍按独立子项目对待——未经批准不修改,改动经本仓库 git 追溯,历史基线=原仓 `E:\Work\Copilot\fofa-mcp` 冻结于 `e851ed1`)未配置时返回 `not_configured`,不伪造结果;凭据只由它自己从 `.env` 读取。
 - Windows/Python 3.14 的 asyncio `unclosed transport` 警告**已根治**(7af95e0):cmd_recon finally 显式关闭 fofa stdio 客户端,close() 有序关停管道(`wait_closed`/`wait` 替代 `communicate` 竞态)。若再见到 "Exception ignored",先查新命令是否漏了 finally close。
 - http-observe 错误分类已细分(P03):`timeout` 带 `error_type=timeout_connect|timeout_app_layer`(端口不通 vs TCP 通服务不应答,8601 判读靠它),`tls_error` 带 `tls_failure_kind=cert_verify|handshake`;adapter 层 error 形如 `timeout:timeout_app_layer`。
 - port-check 已读 banner(D-3):非 TLS 端口落 `banner` 字段;静默端口 status=`open_no_banner`(区别于 open),`error_type=closed_after_accept` 区分 accept-即关(tarpit)与静默挂住——报告判读注意语义。

@@ -251,7 +251,7 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 进入 R4 资产归并（届时以归并依据放开 ASN 绑定直查）。
 
 真实搜索 smoke test 已在用户明确授权的
-`www.ceramtec-group.cn` 上执行。任务
+`www.example.com` 上执行。任务
 `task-9542e3d99077458c` 使用 `passive_only`、`size=10` 和独立证据目录，
 返回 2 条观察、1 页结果；生成 JSON/XLSX 报告。未执行目标直连、端口扫描、
 浏览器观察或其他主动探测。
@@ -280,7 +280,7 @@ migration 变化。R3 被动多源闭环（DNS/CT/RDAP + 统一收口）至此�
 - [x] 健康检查分别记录：工具存在、版本、账号可用性、数据许可、网络出口、
       认证状态和成本能力；不可用时返回 `not_configured` 或 `failed`。
 - [x] 真实调用仅允许在用户明确提供授权、凭据状态通过预检且目标在任务
-      scope 内；本轮 CeramTec smoke test 保持 `passive_only`，开发和无凭据
+      scope 内；本轮 ClientCorp smoke test 保持 `passive_only`，开发和无凭据
       环境继续使用 fixture。
 
 ### 2.2 查询计划和批次

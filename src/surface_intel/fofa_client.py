@@ -228,8 +228,8 @@ class FofaStdioClient:
 
 
 # fofa-mcp 是外部依赖(独立项目,本工具只经 stdio 调用)。部署位置按
-# 三级解析:env SURFACE_INTEL_FOFA_ROOT > 本项目同级目录(迁移部署时把
-# fofa-mcp 放在 surface-intel 旁边即零配置) > 历史固定路径(兼容旧机)。
+# 三级解析:env SURFACE_INTEL_FOFA_ROOT > 本仓库内置 mcp/fofa-mcp/ 子项目
+# (迁移时随 skill 目录整体走,零配置命中) > 历史固定路径(兼容旧机)。
 _LEGACY_FOFA_ROOT = Path(r"E:\Work\Copilot\fofa-mcp")
 
 
@@ -237,7 +237,7 @@ def _default_fofa_root() -> Path:
     env_root = os.getenv("SURFACE_INTEL_FOFA_ROOT", "").strip()
     if env_root:
         return Path(env_root)
-    sibling = Path(__file__).resolve().parents[2] / "fofa-mcp"
+    sibling = Path(__file__).resolve().parents[2] / "mcp" / "fofa-mcp"
     if (sibling / "pyproject.toml").is_file():
         return sibling
     return _LEGACY_FOFA_ROOT

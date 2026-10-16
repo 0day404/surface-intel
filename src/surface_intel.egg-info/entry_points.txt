@@ -1,2 +1,0 @@
-[console_scripts]
-surface-intel = surface_intel.cli:main

@@ -2,7 +2,7 @@
 
 MockPassiveAdapter 和 MockFofaAdapter 用于离线 fixture；FofaMcpAdapter 只接受注入的
 MCP 调用函数，不包含 FOFA 实现。FOFA 必须通过独立适配器调用 fofa-mcp 子项目
-（vendored 于本仓库 `fofa-mcp/`，保持独立版本与测试）；Playwright 使用外部命令
+（vendored 于本仓库 `mcp/fofa-mcp/`，保持独立版本与测试）；Playwright 使用外部命令
 `npx -y @playwright/mcp@latest`，不复制源码、依赖、缓存或凭据。
 
 P4 增加 `CapabilityRegistry`，每个适配器必须声明能力、所需主动等级、成本、分页/
